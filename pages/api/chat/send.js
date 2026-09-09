@@ -100,10 +100,11 @@ export default async function handler(req, res) {
 
     let aiReply = null;
     let usedApiName = null;
+    let lastError = null;
 
     for (const api of apis.rows) {
       try {
-        const reply = await callAI(api, messages, { maxTokens: 3000, timeout: 30000, maxRetries: 1 });
+        const reply = await callAI(api, messages, { maxTokens: 3000, timeout: 15000, maxRetries: 0 });
         if (reply && reply.trim()) {
           aiReply = reply;
           usedApiName = api.name;
@@ -112,12 +113,15 @@ export default async function handler(req, res) {
       } catch (err) {
         console.log(`API ${api.name} failed:`, err.message);
         // 不自动标记 is_available=FALSE：瞬时限流(429)等不应导致 API 永久失效
+        // 记录失败原因，供最终错误提示使用
+        lastError = err.message;
         // is_available 仅由管理员在管理区手动检测(check_all/test)时更新
       }
     }
 
     if (!aiReply) {
-      aiReply = '所有 AI API 接口当前均不可用，请稍后重试或联系管理员检查 API 配置。';
+      const reason = lastError ? `（原因：${lastError}）` : '';
+      aiReply = `AI 服务暂时不可用${reason}，请稍后重试或联系管理员检查 API 配置。`;
     }
 
     res.status(200).json({
