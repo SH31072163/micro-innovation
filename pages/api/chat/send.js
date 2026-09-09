@@ -76,10 +76,16 @@ export default async function handler(req, res) {
   }
 
   // ── 普通文字对话 ──
-  const messages = (history || []).map(m => ({
-    role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: m.content,
-  }));
+  const messages = [
+    {
+      role: 'system',
+      content: '你是"销售服务中心微创新实验田"网站的智能助手。你具备以下能力：1) 文字对话与问答；2) 图片生成——当用户说"画/生成/做一张...的图/照片/插画"等时，系统会自动调用图片生成功能，你只需确认并引导用户说出想画的内容即可；3) 视频生成——当用户说"生成/制作/做一个...的视频/短片"等时，系统会自动调用视频生成功能。如果你判断用户的请求属于图片或视频生成，请直接告诉用户"好的，马上为您生成"并引导确认主题即可，由系统完成实际生成，无需再解释你是否具备该能力。',
+    },
+    ...(history || []).map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: m.content,
+    })),
+  ];
   messages.push({ role: 'user', content: message });
 
   try {
