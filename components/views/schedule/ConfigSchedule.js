@@ -145,14 +145,71 @@ export default function ConfigSchedule({ token }) {
     setMsg('');
   };
 
-  // 更新单元格
+  // 获取餐时下拉选项（规则1：日班/早班仅限11:00餐/11:30餐/12:00餐；晚班固定17:30餐；全班固定11:30餐；假/休固定显示假/休）
+  const getMealTimeOptions = (shiftVal) => {
+    if (shiftVal === '假') return [{ value: '假' }];
+    if (shiftVal === '休') return [{ value: '休' }];
+    if (shiftVal === '晚班') return [{ value: '17:30餐' }];
+    if (shiftVal === '全班') return [{ value: '11:30餐' }];
+    // 日班/早班/空
+    return [{ value: '11:00餐' }, { value: '11:30餐' }, { value: '12:00餐' }];
+  };
+
+  // AM→PM工种映射（规则4：选AM语音→PM默认PM语音，但可改）
+  const mapAmToPm = (amVal) => {
+    if (!amVal) return '';
+    return amVal.replace('AM', 'PM');
+  };
+
+  // 更新单元格（含联动规则）
   const updateCell = (empId, day, field, value) => {
     if (!editing[empId]) editing[empId] = {};
     if (!editing[empId][day]) {
       const orig = data.records[empId]?.[day] || {};
       editing[empId][day] = { shift: orig.shift || '', meal_time: orig.meal_time || '', am_work_type: orig.am_work_type || '', pm_work_type: orig.pm_work_type || '' };
     }
-    editing[empId][day][field] = value;
+    const cell = editing[empId][day];
+    cell[field] = value;
+
+    // ── 联动规则 ──
+    if (field === 'shift') {
+      // 规则1：班次→餐时联动
+      if (value === '晚班') {
+        cell.meal_time = '17:30餐';
+      } else if (value === '全班') {
+        cell.meal_time = '11:30餐';
+      } else if (value === '日班' || value === '早班') {
+        // 仅限11:00餐/11:30餐/12:00餐，若当前值不在范围内则默认11:30餐
+        if (!['11:00餐', '11:30餐', '12:00餐'].includes(cell.meal_time)) {
+          cell.meal_time = '11:30餐';
+        }
+      }
+      // 规则2：班次"假"→其余3格全"假"
+      if (value === '假') {
+        cell.meal_time = '假';
+        cell.am_work_type = 'AM假';
+        cell.pm_work_type = 'PM假';
+      }
+      // 规则3：班次"休"→其余3格全"休"
+      if (value === '休') {
+        cell.meal_time = '休';
+        cell.am_work_type = 'AM休';
+        cell.pm_work_type = 'PM休';
+      }
+    }
+
+    // 规则4：AM工种→PM工种默认联动（仅当PM工种为空或与旧AM匹配时自动填充）
+    if (field === 'am_work_type') {
+      const currentPm = cell.pm_work_type || '';
+      const expectedPm = mapAmToPm(value);
+      // 如果PM为空，或PM工种还是之前AM工种对应的PM值（即没被人手改过），则自动联动
+      const prevAm = editing[empId][day]._prevAm || '';
+      if (!currentPm || currentPm === mapAmToPm(prevAm)) {
+        cell.pm_work_type = expectedPm;
+      }
+      cell._prevAm = value; // 记录当前AM，用于下次判断是否被手动改过
+    }
+
     setEditing({ ...editing });
   };
 
@@ -269,28 +326,46 @@ export default function ConfigSchedule({ token }) {
                   {data.days.map((_, dayIdx) => {
                     const day = dayIdx + 1;
                     const shiftVal = getCell(emp.employee_id, day, 'shift');
+                    const mealVal = getCell(emp.employee_id, day, 'meal_time');
                     const amVal = getCell(emp.employee_id, day, 'am_work_type');
                     const pmVal = getCell(emp.employee_id, day, 'pm_work_type');
                     const isEditing = editing[emp.employee_id]?.[day];
+                    const mealOptions = getMealTimeOptions(shiftVal);
+                    // 假/休状态下AM/PM工种下拉只显示对应选项
+                    const isLocked = shiftVal === '假' || shiftVal === '休';
+                    const amOptions = isLocked ? [{ value: shiftVal === '假' ? 'AM假' : 'AM休' }] : (dictData?.['am_work_type'] || []);
+                    const pmOptions = isLocked ? [{ value: shiftVal === '假' ? 'PM假' : 'PM休' }] : (dictData?.['pm_work_type'] || []);
                     return (
                       <td key={dayIdx} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: isEditing ? '#fffde7' : '#fff' }}>
+                        {/* 第1个格子：班次 */}
                         <select value={shiftVal}
                           onChange={e => updateCell(emp.employee_id, day, 'shift', e.target.value)}
                           style={{ width: '55px', fontSize: '10px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', textAlign: 'center' }}>
                           <option value=""></option>
                           {(dictData?.['shift'] || []).map(d => <option key={d.id} value={d.value}>{d.value}</option>)}
                         </select>
+                        {/* 第2个格子：餐时（联动班次） */}
+                        <select value={mealVal}
+                          onChange={e => updateCell(emp.employee_id, day, 'meal_time', e.target.value)}
+                          disabled={isLocked || shiftVal === '晚班' || shiftVal === '全班'}
+                          style={{ width: '55px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto', textAlign: 'center' }}>
+                          {mealOptions.map((o, i) => <option key={i} value={o.value}>{o.value}</option>)}
+                        </select>
+                        {/* 第3个格子：AM工种 */}
                         <select value={amVal}
                           onChange={e => updateCell(emp.employee_id, day, 'am_work_type', e.target.value)}
+                          disabled={isLocked}
                           style={{ width: '60px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto' }}>
                           <option value=""></option>
-                          {(dictData?.['am_work_type'] || []).map(d => <option key={d.id} value={d.value}>{d.value}</option>)}
+                          {amOptions.map(d => <option key={d.id || d.value} value={d.value}>{d.value}</option>)}
                         </select>
+                        {/* 第4个格子：PM工种（默认联动AM，可手改） */}
                         <select value={pmVal}
                           onChange={e => updateCell(emp.employee_id, day, 'pm_work_type', e.target.value)}
+                          disabled={isLocked}
                           style={{ width: '60px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto' }}>
                           <option value=""></option>
-                          {(dictData?.['pm_work_type'] || []).map(d => <option key={d.id} value={d.value}>{d.value}</option>)}
+                          {pmOptions.map(d => <option key={d.id || d.value} value={d.value}>{d.value}</option>)}
                         </select>
                       </td>
                     );
