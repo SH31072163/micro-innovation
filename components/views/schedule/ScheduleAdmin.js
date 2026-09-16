@@ -22,8 +22,8 @@ export default function ScheduleAdmin({ token }) {
     <div style={{ padding: '24px' }}>
       <h3 style={{ fontSize: '18px', color: '#1e3a5f', marginBottom: '20px' }}>排班表管理区</h3>
 
-      {/* 标签栏 */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '2px solid #e5e7eb' }}>
+      {/* 标签栏（纵向滚动时冻结在顶部） */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '2px solid #e5e7eb', position: 'sticky', top: 0, zIndex: 100, background: '#f9fafb' }}>
         {tabs.map((t, i) => (
           <button
             key={i}
@@ -33,7 +33,7 @@ export default function ScheduleAdmin({ token }) {
               fontSize: '13px',
               fontWeight: tab === i ? '600' : 'normal',
               color: tab === i ? '#2563eb' : '#6b7280',
-              background: tab === i ? '#eff6ff' : 'transparent',
+              background: tab === i ? '#eff6ff' : '#f9fafb',
               borderBottom: tab === i ? '2px solid #2563eb' : '2px solid transparent',
               marginBottom: '-2px',
               borderRadius: '4px 4px 0 0',
