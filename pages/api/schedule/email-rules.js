@@ -39,18 +39,29 @@ export default async function handler(req, res) {
       const { rules } = req.body;
       if (!rules || !Array.isArray(rules)) return res.status(400).json({ error: '缺少规则数据' });
 
-      for (const r of rules) {
-        await query(
-          `UPDATE schedule_email_rules
-           SET is_enabled = $1, send_date = $2, send_time = $3, title_template = $4
-           WHERE id = $5`,
-          [
+      // 批量多行 VALUES 更新（单条SQL，避免子请求超限）
+      // 用 UPDATE ... FROM (VALUES ...) 语法一次更新多行
+      if (rules.length > 0) {
+        const values = [];
+        const params = [];
+        rules.forEach((r, i) => {
+          const base = i * 5;
+          values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`);
+          params.push(
+            r.id,
             r.is_enabled !== undefined ? r.is_enabled : true,
             r.send_date || '',
             r.send_time || '',
-            r.title_template || '',
-            r.id
-          ]
+            r.title_template || ''
+          );
+        });
+        await query(
+          `UPDATE schedule_email_rules AS e
+           SET is_enabled = v.is_enabled, send_date = v.send_date,
+               send_time = v.send_time, title_template = v.title_template
+           FROM (VALUES ${values.join(', ')}) AS v(id, is_enabled, send_date, send_time, title_template)
+           WHERE e.id = v.id`,
+          params
         );
       }
 
