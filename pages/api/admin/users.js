@@ -1,7 +1,7 @@
 import { query } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
 import { sendMail } from '../../../lib/mailer';
-import { validatePassword, validateEmail } from '../../../lib/validators';
+import { validatePassword, validateEmail, generateToken } from '../../../lib/validators';
 
 export default async function handler(req, res) {
   const userInfo = getUserFromRequest(req);
@@ -46,6 +46,34 @@ export default async function handler(req, res) {
       } else if (action === 'unfreeze') {
         await query('UPDATE users SET status = $1, login_fail_count = 0 WHERE id = $2', ['active', userId]);
         res.status(200).json({ message: '已解冻' });
+      } else if (action === 'resend_verify') {
+        // 重发注册验证邮件：仅对状态="待邮箱验证"（active且email_verified=false）的用户有效
+        const targetResult = await query('SELECT id, email, status, email_verified FROM users WHERE id = $1', [userId]);
+        if (targetResult.rows.length === 0) return res.status(404).json({ error: '用户不存在' });
+        const targetUser = targetResult.rows[0];
+        if (targetUser.status === 'frozen') return res.status(400).json({ error: '该账号已冻结，请先解冻' });
+        if (targetUser.email_verified) return res.status(400).json({ error: '该用户邮箱已验证，无需重发' });
+        if (!targetUser.email) return res.status(400).json({ error: '该用户无关联邮箱' });
+
+        // 作废该用户所有未使用的注册验证链接，避免多个有效链接并存
+        await query("UPDATE email_tokens SET used = TRUE WHERE user_id = $1 AND type = 'register' AND used = FALSE", [userId]);
+
+        // 生成新 token（24小时有效），与注册时逻辑一致
+        const token = generateToken();
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        await query('INSERT INTO email_tokens (user_id, token, type, expires_at) VALUES ($1, $2, $3, $4)', [userId, token, 'register', expiresAt]);
+
+        const verifyUrl = `${req.headers.origin || 'http://localhost:3000'}/api/auth/verify?token=${token}`;
+        const mailHtml = `
+          <h2>欢迎注册「销售服务中心微创新实验田」</h2>
+          <p>请在24小时内点击以下链接完成邮箱验证：</p>
+          <p><a href="${verifyUrl}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:4px;">点击验证邮箱</a></p>
+          <p>或复制以下链接到浏览器打开：</p>
+          <p>${verifyUrl}</p>
+          <p>此链接24小时后失效。</p>
+        `;
+        await sendMail(targetUser.email, '【微创新实验田】请验证您的注册邮箱', mailHtml);
+        res.status(200).json({ message: `验证邮件已重新发送到 ${targetUser.email}，请提醒用户在24小时内点击邮件中的链接完成验证。` });
       } else {
         res.status(400).json({ error: '未知操作' });
       }
