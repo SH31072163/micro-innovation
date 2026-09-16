@@ -42,6 +42,10 @@ export default function ScheduleView({ token }) {
       });
       if (res.ok) {
         const d = await res.json();
+        // API 返回 days 为数字，转为数组供 .map() 使用
+        if (typeof d.days === 'number') {
+          d.days = Array.from({ length: d.days }, (_, i) => i + 1);
+        }
         setData(d);
       }
     } catch (err) {
@@ -60,7 +64,8 @@ export default function ScheduleView({ token }) {
     if (!data || data.isEmpty || !data.employees) return;
 
     const wsData = [];
-    const days = data.days;
+    // days 可能已被转为数组，统一取天数
+    const days = Array.isArray(data.days) ? data.days.length : data.days;
     const weekdays = data.weekdays;
     const wdNames = ['', '一', '二', '三', '四', '五', '六', '日'];
 
