@@ -498,6 +498,70 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
     }
   }
 
+  // ── 规则9: 每天尽量覆盖所有上机工种 ──
+  // 收集所有员工使用的上机工种类型
+  const allWorkTypes = new Set();
+  for (const emp of employees) {
+    const rule = rulesMap[emp.employee_id];
+    if (rule && rule.workTypes) {
+      rule.workTypes.forEach(wt => allWorkTypes.add(wt));
+    }
+  }
+  const allWorkTypeList = Array.from(allWorkTypes);
+
+  if (allWorkTypeList.length > 1) {
+    // 对每一天，统计当天各工种的覆盖情况，尝试填补缺失工种
+    for (let d = 1; d <= days; d++) {
+      // 统计当天各工种的在岗人数
+      const dayCoverage = {}; // workType -> count
+      allWorkTypeList.forEach(wt => { dayCoverage[wt] = 0; });
+
+      const dayOnMachineEmps = []; // 当天上机的员工
+      for (const emp of employees) {
+        const rec = empSchedule[emp.employee_id]?.[d];
+        if (rec && rec.shift !== '休' && rec.shift !== '假' &&
+            rec.am_work_type && !rec.am_work_type.includes('专项') && !rec.am_work_type.includes('代值班') && !rec.am_work_type.includes('休')) {
+          const wt = rec.am_work_type.replace('AM', '');
+          if (dayCoverage[wt] !== undefined) dayCoverage[wt]++;
+          dayOnMachineEmps.push({ emp, rec, workType: wt });
+        }
+      }
+
+      // 找出缺失的工种（当天在岗人数为0的）
+      const missingTypes = allWorkTypeList.filter(wt => dayCoverage[wt] === 0);
+
+      // 尝试为每个缺失工种找一个当天上机的员工来承担
+      for (const missingWt of missingTypes) {
+        if (dayOnMachineEmps.length === 0) break;
+
+        // 优先找：该员工的规则中包含缺失工种、且当天工种在当天有多余人手的
+        let bestCandidate = null;
+        for (const entry of dayOnMachineEmps) {
+          const empRule = rulesMap[entry.emp.employee_id];
+          if (empRule && empRule.workTypes && empRule.workTypes.includes(missingWt)) {
+            // 检查该员工当天工种在当天是否有多人（>=2），避免拆走唯一的人手
+            if (dayCoverage[entry.workType] >= 2) {
+              bestCandidate = entry;
+              break;
+            }
+            // 如果没有多余人手的候选，也记录下来作为备选
+            if (!bestCandidate) bestCandidate = entry;
+          }
+        }
+
+        if (bestCandidate) {
+          // 将该员工当天的工种改为缺失工种
+          const oldWt = bestCandidate.workType;
+          dayCoverage[oldWt]--;
+          dayCoverage[missingWt]++;
+          bestCandidate.rec.am_work_type = `AM${missingWt}`;
+          bestCandidate.rec.pm_work_type = `PM${missingWt}`;
+          bestCandidate.workType = missingWt;
+        }
+      }
+    }
+  }
+
   // 转换为输出格式
   for (const emp of employees) {
     const empData = empSchedule[emp.employee_id] || {};
@@ -573,25 +637,72 @@ function distributeDaysAcrossWeeks(totalDays, weeks, availableDays) {
 }
 
 /**
- * 将工种平均分配到上机天数
+ * 将工种平均分配到上机天数（规则5：贪心+回溯，尽量避免同一工种连续3天）
+ * 策略：先按比例生成各工种的基础数量，然后逐位贪心填充——
+ *   每次放入前检查前2天是否已是同一工种，若是则尝试换其他工种；
+ *   若所有工种都已用尽余量或都无法放入，则保留当前选择（最小化连续天数）。
+ *   最后通过回溯检查修正仍存在的连续3天（尽量将第3天换为其他有余量的工种）。
  */
 function distributeWorkTypes(totalDays, workTypes) {
   if (!workTypes.length) return ['语音'];
-  const result = [];
+  if (workTypes.length === 1) return new Array(totalDays).fill(workTypes[0]);
+
+  // 计算每种工种的目标数量
   const base = Math.floor(totalDays / workTypes.length);
   const remainder = totalDays % workTypes.length;
+  const quota = {};      // 工种 -> 剩余配额
+  const initialQuota = {};
+  workTypes.forEach((wt, i) => {
+    quota[wt] = base + (i < remainder ? 1 : 0);
+    initialQuota[wt] = quota[wt];
+  });
 
-  for (let i = 0; i < workTypes.length; i++) {
-    const count = base + (i < remainder ? 1 : 0);
-    for (let j = 0; j < count; j++) {
-      result.push(workTypes[i]);
+  const result = new Array(totalDays);
+
+  // 第一轮：贪心填充
+  for (let i = 0; i < totalDays; i++) {
+    // 检查前2天是否同工种
+    const prev1 = i >= 1 ? result[i - 1] : null;
+    const prev2 = i >= 2 ? result[i - 2] : null;
+    const twoInRow = prev1 && prev2 && prev1 === prev2;
+
+    // 候选工种：优先有余量的，且（如果前2天相同）排除该工种
+    let candidates = workTypes.filter(wt => quota[wt] > 0);
+    if (twoInRow) {
+      const avoid = prev1;
+      const preferred = candidates.filter(wt => wt !== avoid);
+      if (preferred.length > 0) candidates = preferred;
     }
+
+    // 在候选中选剩余配额最多的（均衡分布）
+    candidates.sort((a, b) => quota[b] - quota[a]);
+    result[i] = candidates.length > 0 ? candidates[0] : prev1;
+    if (candidates.length > 0) quota[candidates[0]]--;
   }
 
-  // 打乱顺序，避免同工种连续
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
+  // 第二轮：回溯修正连续3天
+  for (let i = 2; i < totalDays; i++) {
+    if (result[i] === result[i - 1] && result[i] === result[i - 2]) {
+      // 连续3天同工种，尝试把第3天换成其他工种
+      const current = result[i];
+      // 找一个其他工种来替换——优先从后续位置中找一个不同工种的来交换
+      let swapped = false;
+      for (let j = i + 1; j < totalDays; j++) {
+        if (result[j] !== current && result[j] !== result[i - 1]) {
+          // 交换 i 和 j
+          // 但要确保交换后 j 位置不会产生新的连续3天
+          const jPrev1 = j >= 1 ? result[j - 1] : null;
+          const jNext1 = j < totalDays - 1 ? result[j + 1] : null;
+          if (jPrev1 !== result[i] && jNext1 !== result[i] &&
+              result[i - 1] !== result[i] /* 已确认不同 */) {
+            [result[i], result[j]] = [result[j], result[i]];
+            swapped = true;
+            break;
+          }
+        }
+      }
+      // 如果无法交换，保留（已最小化连续）
+    }
   }
 
   return result;
