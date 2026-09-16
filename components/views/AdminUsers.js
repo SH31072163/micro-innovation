@@ -8,6 +8,9 @@ export default function AdminUsers({ token, user }) {
   const [editField, setEditField] = useState(null);
   const [editValues, setEditValues] = useState({});
   const [msg, setMsg] = useState('');
+  const [resendingId, setResendingId] = useState(null); // 正在重发邮件的用户id
+  const [barMsg, setBarMsg] = useState(''); // 列表页顶部提示条
+  const [barMsgType, setBarMsgType] = useState(''); // 'success' | 'error'
 
   const searchUsers = async (kw) => {
     setLoading(true);
@@ -54,6 +57,39 @@ export default function AdminUsers({ token, user }) {
         setSelectedUser({ ...selectedUser, status: newStatus, status_text: newStatusText });
       }
     } catch (err) {}
+  };
+
+  // 重发注册验证邮件（仅对状态=待邮箱验证的用户）
+  const handleResendVerify = async (u) => {
+    if (!window.confirm(`确定要向「${u.username}」的邮箱（${u.email}）重新发送注册验证邮件吗？`)) return;
+    setResendingId(u.id);
+    setBarMsg('');
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: 'resend_verify', userId: u.id }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBarMsg(data.message);
+        setBarMsgType('success');
+        searchUsers(keyword);
+        if (selectedUser && selectedUser.id === u.id) setMsg(data.message);
+      } else {
+        setBarMsg(data.error || '重发失败');
+        setBarMsgType('error');
+        if (selectedUser && selectedUser.id === u.id) setMsg(data.error || '重发失败');
+      }
+    } catch (err) {
+      setBarMsg('网络错误，重发失败');
+      setBarMsgType('error');
+    } finally {
+      setResendingId(null);
+    }
   };
 
   const handleEditSubmit = async (field) => {
@@ -124,6 +160,16 @@ export default function AdminUsers({ token, user }) {
         <button className="btn-primary" onClick={() => searchUsers(keyword)}>搜索</button>
       </div>
 
+      {/* 重发结果提示条 */}
+      {barMsg && (
+        <div style={{
+          padding: '10px 14px', borderRadius: '6px', marginBottom: '16px', fontSize: '13px',
+          background: barMsgType === 'success' ? '#f0fdf4' : '#fef2f2',
+          color: barMsgType === 'success' ? '#16a34a' : '#dc2626',
+          border: `1px solid ${barMsgType === 'success' ? '#bbf7d0' : '#fecaca'}`,
+        }}>{barMsg}</div>
+      )}
+
       {/* 用户列表 */}
       <div style={{ background: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
         {loading ? (
@@ -141,6 +187,7 @@ export default function AdminUsers({ token, user }) {
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>部门</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>注册日期</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>当前状态</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -163,6 +210,17 @@ export default function AdminUsers({ token, user }) {
                       color: u.status === 'frozen' ? '#dc2626'
                         : (u.status_text === '待邮箱验证' ? '#d97706' : '#16a34a'),
                     }}>{u.status_text}</span>
+                  </td>
+                  <td style={{ padding: '10px 16px' }} onClick={e => e.stopPropagation()}>
+                    {u.status_text === '待邮箱验证' && u.email ? (
+                      <button className="btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }}
+                        onClick={() => handleResendVerify(u)}
+                        disabled={resendingId === u.id}>
+                        {resendingId === u.id ? '发送中...' : '重发注册链接'}
+                      </button>
+                    ) : (
+                      <span style={{ color: '#d1d5db' }}>—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -300,6 +358,25 @@ export default function AdminUsers({ token, user }) {
 
               {/* 注册日期 */}
               <DetailRow label="注册日期" value={selectedUser.register_date} />
+
+              {/* 当前状态（待邮箱验证时提供重发按钮） */}
+              <DetailRow label="当前状态" value={
+                <span style={{
+                  padding: '2px 8px', borderRadius: '4px', fontSize: '12px',
+                  background: selectedUser.status === 'frozen' ? '#fef2f2'
+                    : (selectedUser.status_text === '待邮箱验证' ? '#fffbeb' : '#f0fdf4'),
+                  color: selectedUser.status === 'frozen' ? '#dc2626'
+                    : (selectedUser.status_text === '待邮箱验证' ? '#d97706' : '#16a34a'),
+                }}>{selectedUser.status_text}</span>
+              }>
+                {selectedUser.status_text === '待邮箱验证' && selectedUser.email && (
+                  <button className="btn-primary" style={{ padding: '2px 10px', fontSize: '12px' }}
+                    onClick={() => handleResendVerify(selectedUser)}
+                    disabled={resendingId === selectedUser.id}>
+                    {resendingId === selectedUser.id ? '发送中...' : '重发注册链接'}
+                  </button>
+                )}
+              </DetailRow>
 
               {/* 删除账号 */}
               <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px' }}>
