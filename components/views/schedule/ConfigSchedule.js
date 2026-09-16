@@ -47,6 +47,10 @@ export default function ConfigSchedule({ token }) {
       });
       if (res.ok) {
         const d = await res.json();
+        // API 返回 days 为数字，转为数组供 .map() 使用
+        if (typeof d.days === 'number') {
+          d.days = Array.from({ length: d.days }, (_, i) => i + 1);
+        }
         setData(d);
         setEditing({});
       }
