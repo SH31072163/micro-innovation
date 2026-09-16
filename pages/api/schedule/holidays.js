@@ -58,15 +58,22 @@ export default async function handler(req, res) {
           // 先清除该年旧数据
           await query(`DELETE FROM schedule_holidays WHERE EXTRACT(YEAR FROM date) = $1`, [targetYear]);
 
-          // 批量插入
+          // 批量插入（单条多行 VALUES，避免子请求超限）
           let inserted = 0;
-          for (const h of holidays) {
+          if (holidays.length > 0) {
+            const values = [];
+            const params = [];
+            holidays.forEach((h, i) => {
+              const base = i * 3;
+              values.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
+              params.push(h.date, h.name, h.isHoliday);
+            });
             await query(
-              `INSERT INTO schedule_holidays (date, name, is_holiday) VALUES ($1, $2, $3)
-               ON CONFLICT (date) DO UPDATE SET name = $2, is_holiday = $3`,
-              [h.date, h.name, h.isHoliday]
+              `INSERT INTO schedule_holidays (date, name, is_holiday) VALUES ${values.join(', ')}
+               ON CONFLICT (date) DO UPDATE SET name = EXCLUDED.name, is_holiday = EXCLUDED.is_holiday`,
+              params
             );
-            inserted++;
+            inserted = holidays.length;
           }
 
           return res.status(200).json({
