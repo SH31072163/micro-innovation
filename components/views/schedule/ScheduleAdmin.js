@@ -5,16 +5,17 @@ import ConfigConversion from './ConfigConversion';
 import ConfigEmployees from './ConfigEmployees';
 import ConfigEmail from './ConfigEmail';
 import ConfigRules from './ConfigRules';
+import ConfigHolidays from './ConfigHolidays';
 
 /**
- * 排班表管理区 - 6个配置页面
- * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 人员增删 | 邮件提醒 | 默认规则
+ * 排班表管理区 - 7个配置页面
+ * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 人员增删 | 邮件提醒 | 默认规则 | 假日配置
  */
 export default function ScheduleAdmin({ token }) {
   const [tab, setTab] = useState(0);
 
   const tabs = [
-    '配置排班', '数据字典', '换算规则', '人员增删', '邮件提醒', '默认规则',
+    '配置排班', '数据字典', '换算规则', '人员增删', '邮件提醒', '默认规则', '假日配置',
   ];
 
   return (
@@ -53,6 +54,7 @@ export default function ScheduleAdmin({ token }) {
         {tab === 3 && <ConfigEmployees token={token} />}
         {tab === 4 && <ConfigEmail token={token} />}
         {tab === 5 && <ConfigRules token={token} />}
+        {tab === 6 && <ConfigHolidays token={token} />}
       </div>
     </div>
   );
