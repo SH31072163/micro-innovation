@@ -61,6 +61,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: '缺少必要参数' });
       }
 
+      // 先完成全部验证，再批量写入（避免部分写入）
+      const validated = [];
       for (const r of rules) {
         // 验证：默认上机天数 > 0，浮点1位小数
         const days = parseFloat(r.default_on_machine_days);
@@ -83,13 +85,26 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: `至少选择1个可上机工作日: ${r.employee_id}` });
         }
 
-        // UPSERT
+        validated.push({ empId: r.employee_id, days: roundedDays, wt: JSON.stringify(workTypes), wd: JSON.stringify(weekdays) });
+      }
+
+      // 批量多行 VALUES UPSERT（单条SQL，避免子请求超限）
+      if (validated.length > 0) {
+        const values = [];
+        const params = [];
+        validated.forEach((v, i) => {
+          const base = i * 6;
+          values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`);
+          params.push(v.empId, year, month, v.days, v.wt, v.wd);
+        });
         await query(
           `INSERT INTO schedule_default_rules (employee_id, year, month, default_on_machine_days, allowed_work_types, allowed_weekdays)
-           VALUES ($1, $2, $3, $4, $5, $6)
+           VALUES ${values.join(', ')}
            ON CONFLICT (employee_id, year, month)
-           DO UPDATE SET default_on_machine_days = $4, allowed_work_types = $5, allowed_weekdays = $6`,
-          [r.employee_id, year, month, roundedDays, JSON.stringify(workTypes), JSON.stringify(weekdays)]
+           DO UPDATE SET default_on_machine_days = EXCLUDED.default_on_machine_days,
+                         allowed_work_types = EXCLUDED.allowed_work_types,
+                         allowed_weekdays = EXCLUDED.allowed_weekdays`,
+          params
         );
       }
 
