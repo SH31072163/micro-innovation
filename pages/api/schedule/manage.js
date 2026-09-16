@@ -224,14 +224,16 @@ export default async function handler(req, res) {
         }
       }
 
-      const holidaySet = new Set();
+      const holidaySet = new Set();      // 法定假日（is_holiday=true，当天放假）
+      const workdaySet = new Set();      // 调休上班日（is_holiday=false，周末需上班）
       for (const h of holidaysResult.rows) {
         const d = new Date(h.date).getDate();
         if (h.is_holiday) holidaySet.add(d);
+        else workdaySet.add(d);
       }
 
       // 执行排班算法
-      const schedule = runScheduleAlgorithm(year, month, employees.rows, rulesMap, holidaySet);
+      const schedule = runScheduleAlgorithm(year, month, employees.rows, rulesMap, holidaySet, workdaySet);
 
       // 删除旧记录
       await query('DELETE FROM schedule_records WHERE year = $1 AND month = $2', [year, month]);
@@ -339,8 +341,9 @@ async function cleanupOldRecords() {
 
 /**
  * 排班算法实现（10条规则）
+ * holidaySet: 法定假日日期集合；workdaySet: 调休上班日集合（周末但需上班）
  */
-function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
+function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet, workdaySet = new Set()) {
   const days = getDaysInMonth(year, month);
   const weekdays = getWeekdays(year, month, days);
   const schedule = [];
@@ -353,10 +356,11 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
     const rule = rulesMap[emp.employee_id];
     if (!rule) continue;
 
-    // ── 规则7: 先把国定假日和双休日标为"休" ──
+    // ── 规则7: 先把国定假日和双休日标为"休"（调休上班日除外） ──
     for (let d = 1; d <= days; d++) {
       const wd = weekdays[d - 1];
-      if (holidaySet.has(d) || wd > 5) {
+      // 周六周日为休，但如果该日是调休上班日（workdaySet）则照常上班
+      if (holidaySet.has(d) || (wd > 5 && !workdaySet.has(d))) {
         empSchedule[emp.employee_id][d] = {
           shift: '休',
           meal_time: '休',
@@ -407,8 +411,10 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
         let shift = '日班';
         let mealTime = '11:30餐';
 
-        // ── 规则4: 安排晚班 ──
-        if (needsLateShift && lateShiftCount < 2) {
+        // ── 规则4: 安排晚班（避免连续2天晚班：前一天已晚班则本次不排） ──
+        const prevRecForLate = d > 1 ? empSchedule[emp.employee_id][d - 1] : null;
+        const prevIsLate = prevRecForLate && prevRecForLate.shift === '晚班';
+        if (needsLateShift && lateShiftCount < 2 && !prevIsLate) {
           shift = '晚班';
           mealTime = '17:30餐';
           lateShiftCount++;
@@ -419,7 +425,13 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
         if (d > 1) {
           const prevDay = empSchedule[emp.employee_id][d - 1];
           if (prevDay && prevDay.shift === '晚班' && (shift === '早班' || shift === '日班')) {
-          // 跳过这天，改为休息日
+            // 跳过这天，标为"休"，避免规则10误补为"日班+专项"
+            empSchedule[emp.employee_id][d] = {
+              shift: '休',
+              meal_time: '休',
+              am_work_type: 'AM休',
+              pm_work_type: 'PM休',
+            };
             continue;
           }
         }
@@ -461,7 +473,7 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
   let dutyIndex = 0;
   for (let d = 1; d <= days; d++) {
     const wd = weekdays[d - 1];
-    if (wd > 5 || holidaySet.has(d)) {
+    if ((wd > 5 && !workdaySet.has(d)) || holidaySet.has(d)) {
       // 休息日，安排代值班
       const emp = dutyCandidates[dutyIndex % dutyCandidates.length];
       dutyIndex++;
@@ -477,22 +489,20 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet) {
   }
 
   // ── 规则8: 每次休息日后第一天至少安排2人承担"工单留邮" ──
+  // 休息日判定与规则7一致：法定假日，或非调休上班日的周末
+  const isRestDay = (d) => d >= 1 && d <= days && (holidaySet.has(d) || (weekdays[d - 1] > 5 && !workdaySet.has(d)));
   for (let d = 1; d <= days; d++) {
-    // 检查是否是休息日后的第一个工作日
-    if (d > 1) {
-      const prevWd = weekdays[d - 2];
-      const curWd = weekdays[d - 1];
-      if (prevWd > 5 && curWd <= 5) {
-        // 找2个当天上机的员工，安排工单留邮
-        let ticketCount = 0;
-        for (const emp of employees) {
-          if (ticketCount >= 2) break;
-          const dayRecord = empSchedule[emp.employee_id]?.[d];
-          if (dayRecord && dayRecord.shift !== '休' && dayRecord.shift !== '假') {
-            dayRecord.am_work_type = 'AM工单留邮';
-            dayRecord.pm_work_type = 'PM工单留邮';
-            ticketCount++;
-          }
+    // 检查是否是休息日后的第一个工作日（调休上班日视为工作日）
+    if (d > 1 && isRestDay(d - 1) && !isRestDay(d)) {
+      // 找2个当天上机的员工，安排工单留邮
+      let ticketCount = 0;
+      for (const emp of employees) {
+        if (ticketCount >= 2) break;
+        const dayRecord = empSchedule[emp.employee_id]?.[d];
+        if (dayRecord && dayRecord.shift !== '休' && dayRecord.shift !== '假') {
+          dayRecord.am_work_type = 'AM工单留邮';
+          dayRecord.pm_work_type = 'PM工单留邮';
+          ticketCount++;
         }
       }
     }
