@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start -p 3000",
     "cf:build": "npx opennextjs-cloudflare build",
-    "cf:deploy": "npx opennextjs-cloudflare build && npx wrangler pages deploy .open-next --project-name micro-innovation --branch main",
+    "cf:deploy": "npx opennextjs-cloudflare build && copy /b .open-next\\worker.js .open-next\\_worker.js && npx wrangler pages deploy .open-next --project-name micro-innovation --branch main",
     "init-db": "node -e \"require('./lib/db').initializeDb()\""
   },
   "keywords": [],
