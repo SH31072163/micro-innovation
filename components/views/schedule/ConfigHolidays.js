@@ -5,8 +5,16 @@ import { useState, useEffect, useCallback } from 'react';
  * - 一键从互联网抓取当年国定假日
  * - 手工添加/修正单条假日（含调休上班日）
  * - 删除单条假日
- * - 按年查看列表
+ * - 按年查看列表（含星期列）
  */
+
+// 从日期字符串计算星期（避免时区偏移，手动解析年月日）
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+function getWeekdayName(dateStr) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const wd = new Date(y, m - 1, d).getDay(); // 0=周日
+  return WEEKDAY_NAMES[wd];
+}
 export default function ConfigHolidays({ token }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [holidays, setHolidays] = useState([]);
@@ -208,6 +216,7 @@ export default function ConfigHolidays({ token }) {
               <tr style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>序号</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>日期</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>星期</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>名称</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>类型</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>操作</th>
@@ -218,6 +227,10 @@ export default function ConfigHolidays({ token }) {
                 <tr key={h.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: '10px 16px', color: '#9ca3af' }}>{i + 1}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{h.date}</td>
+                  <td style={{
+                    padding: '10px 16px', fontWeight: '600',
+                    color: ['周六', '周日'].includes(getWeekdayName(h.date)) ? '#dc2626' : '#374151',
+                  }}>{getWeekdayName(h.date)}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{h.name}</td>
                   <td style={{ padding: '10px 16px' }}>
                     <span style={{
