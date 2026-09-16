@@ -37,17 +37,32 @@ export default async function handler(req, res) {
       const { rules } = req.body;
       if (!rules || !Array.isArray(rules)) return res.status(400).json({ error: '缺少规则数据' });
 
+      // 先完成全部验证，再批量写入
+      const validated = [];
       for (const r of rules) {
         // 验证：浮点型1位小数且>0
         const val = parseFloat(r.value);
         if (isNaN(val) || val <= 0) {
           return res.status(400).json({ error: `值必须大于0: ${r.value}` });
         }
-        // 限制1位小数
-        const rounded = Math.round(val * 10) / 10;
+        validated.push({ id: r.id, val: Math.round(val * 10) / 10 });
+      }
+
+      // 批量多行 VALUES 更新（单条SQL，避免子请求超限）
+      if (validated.length > 0) {
+        const values = [];
+        const params = [];
+        validated.forEach((v, i) => {
+          const base = i * 2;
+          values.push(`($${base + 1}, $${base + 2})`);
+          params.push(v.val, v.id);
+        });
         await query(
-          'UPDATE schedule_conversion_rules SET value = $1 WHERE id = $2',
-          [rounded, r.id]
+          `UPDATE schedule_conversion_rules AS c
+           SET value = v.val
+           FROM (VALUES ${values.join(', ')}) AS v(val, id)
+           WHERE c.id = v.id`,
+          params
         );
       }
 
