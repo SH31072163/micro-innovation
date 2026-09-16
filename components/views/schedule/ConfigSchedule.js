@@ -145,15 +145,9 @@ export default function ConfigSchedule({ token }) {
     setMsg('');
   };
 
-  // 获取餐时下拉选项（规则1：日班/早班仅限11:00餐/11:30餐/12:00餐；晚班固定17:30餐；全班固定11:30餐；假/休固定显示假/休）
-  const getMealTimeOptions = (shiftVal) => {
-    if (shiftVal === '假') return [{ value: '假' }];
-    if (shiftVal === '休') return [{ value: '休' }];
-    if (shiftVal === '晚班') return [{ value: '17:30餐' }];
-    if (shiftVal === '全班') return [{ value: '11:30餐' }];
-    // 日班/早班/空
-    return [{ value: '11:00餐' }, { value: '11:30餐' }, { value: '12:00餐' }];
-  };
+  // 获取餐时下拉选项：完整字典
+  // 联动规则仅提供默认值（如晚班→17:30餐、休→休），所有格子均支持手工修改
+  const getMealTimeOptions = () => (dictData?.['meal_time'] || []);
 
   // AM→PM工种映射（规则4：选AM语音→PM默认PM语音，但可改）
   const mapAmToPm = (amVal) => {
@@ -161,7 +155,10 @@ export default function ConfigSchedule({ token }) {
     return amVal.replace('AM', 'PM');
   };
 
-  // 更新单元格（含联动规则）
+  // 更新单元格（含联动规则：仅自动填充默认值，不锁定，均支持手工修改）
+  // 规则1：班次→餐时联动（晚班→17:30餐、全班→11:30餐、日班/早班→11:30餐默认）
+  // 规则2/3：班次假/休→餐时、AM、PM自动填对应值
+  // 规则4：AM→PM默认联动（PM被人手改过则不覆盖）
   const updateCell = (empId, day, field, value) => {
     if (!editing[empId]) editing[empId] = {};
     if (!editing[empId][day]) {
@@ -330,11 +327,10 @@ export default function ConfigSchedule({ token }) {
                     const amVal = getCell(emp.employee_id, day, 'am_work_type');
                     const pmVal = getCell(emp.employee_id, day, 'pm_work_type');
                     const isEditing = editing[emp.employee_id]?.[day];
-                    const mealOptions = getMealTimeOptions(shiftVal);
-                    // 假/休状态下AM/PM工种下拉只显示对应选项
-                    const isLocked = shiftVal === '假' || shiftVal === '休';
-                    const amOptions = isLocked ? [{ value: shiftVal === '假' ? 'AM假' : 'AM休' }] : (dictData?.['am_work_type'] || []);
-                    const pmOptions = isLocked ? [{ value: shiftVal === '假' ? 'PM假' : 'PM休' }] : (dictData?.['pm_work_type'] || []);
+                    // 联动规则仅提供默认值，所有格子均可手工修改（与Excel关联条件一致）
+                    const mealOptions = getMealTimeOptions();
+                    const amOptions = dictData?.['am_work_type'] || [];
+                    const pmOptions = dictData?.['pm_work_type'] || [];
                     return (
                       <td key={dayIdx} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: isEditing ? '#fffde7' : '#fff' }}>
                         {/* 第1个格子：班次 */}
@@ -344,17 +340,15 @@ export default function ConfigSchedule({ token }) {
                           <option value=""></option>
                           {(dictData?.['shift'] || []).map(d => <option key={d.id} value={d.value}>{d.value}</option>)}
                         </select>
-                        {/* 第2个格子：餐时（联动班次） */}
+                        {/* 第2个格子：餐时（默认联动班次，可手工改） */}
                         <select value={mealVal}
                           onChange={e => updateCell(emp.employee_id, day, 'meal_time', e.target.value)}
-                          disabled={isLocked || shiftVal === '晚班' || shiftVal === '全班'}
                           style={{ width: '55px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto', textAlign: 'center' }}>
                           {mealOptions.map((o, i) => <option key={i} value={o.value}>{o.value}</option>)}
                         </select>
-                        {/* 第3个格子：AM工种 */}
+                        {/* 第3个格子：AM工种（班次选假/休时默认联动，可手工改） */}
                         <select value={amVal}
                           onChange={e => updateCell(emp.employee_id, day, 'am_work_type', e.target.value)}
-                          disabled={isLocked}
                           style={{ width: '60px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto' }}>
                           <option value=""></option>
                           {amOptions.map(d => <option key={d.id || d.value} value={d.value}>{d.value}</option>)}
@@ -362,7 +356,6 @@ export default function ConfigSchedule({ token }) {
                         {/* 第4个格子：PM工种（默认联动AM，可手改） */}
                         <select value={pmVal}
                           onChange={e => updateCell(emp.employee_id, day, 'pm_work_type', e.target.value)}
-                          disabled={isLocked}
                           style={{ width: '60px', fontSize: '9px', border: '1px solid #ddd', borderRadius: '2px', padding: '1px 2px', display: 'block', margin: '1px auto' }}>
                           <option value=""></option>
                           {pmOptions.map(d => <option key={d.id || d.value} value={d.value}>{d.value}</option>)}
