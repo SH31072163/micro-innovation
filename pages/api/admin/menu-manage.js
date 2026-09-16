@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET') {
-      const users = await query('SELECT id, username, real_name FROM users WHERE is_admin = FALSE ORDER BY id ASC');
+      const users = await query('SELECT id, username, real_name FROM users WHERE is_admin = FALSE AND email_verified = TRUE ORDER BY id ASC');
       const menus = await query('SELECT id, title, level, parent_id, sort_order, is_system FROM menus ORDER BY level, sort_order ASC');
       const permissions = await query('SELECT user_id, menu_id FROM menu_permissions');
       res.status(200).json({ users: users.rows, menus: menus.rows, permissions: permissions.rows });
