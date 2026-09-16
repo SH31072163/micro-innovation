@@ -8,12 +8,18 @@ import { useState, useEffect, useCallback } from 'react';
  * - 按年查看列表（含星期列）
  */
 
-// 从日期字符串计算星期（避免时区偏移，手动解析年月日）
+// 从日期字符串计算星期（兼容 PostgreSQL date 序列化后的 ISO 格式 "2026-01-01T00:00:00.000Z"）
+// 手动解析年月日，避免 new Date(string) 的时区偏移问题
 const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 function getWeekdayName(dateStr) {
-  const [y, m, d] = String(dateStr).split('-').map(Number);
+  const datePart = String(dateStr).split('T')[0]; // "2026-01-01"
+  const [y, m, d] = datePart.split('-').map(Number);
   const wd = new Date(y, m - 1, d).getDay(); // 0=周日
   return WEEKDAY_NAMES[wd];
+}
+// 日期显示格式化：截取 YYYY-MM-DD
+function formatDate(dateStr) {
+  return String(dateStr).split('T')[0];
 }
 export default function ConfigHolidays({ token }) {
   const [year, setYear] = useState(new Date().getFullYear());
@@ -178,6 +184,11 @@ export default function ConfigHolidays({ token }) {
               <label style={{ fontSize: '12px', color: '#6b7280', marginRight: '4px' }}>日期</label>
               <input type="date" className="input-field" style={{ width: '150px', fontSize: '13px', padding: '4px 8px' }}
                 value={newDate} onChange={e => setNewDate(e.target.value)} />
+              {newDate && (
+                <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: '600', color: ['周六', '周日'].includes(getWeekdayName(newDate)) ? '#dc2626' : '#6b7280' }}>
+                  {getWeekdayName(newDate)}
+                </span>
+              )}
             </div>
             <div>
               <label style={{ fontSize: '12px', color: '#6b7280', marginRight: '4px' }}>名称</label>
@@ -226,7 +237,7 @@ export default function ConfigHolidays({ token }) {
               {holidays.map((h, i) => (
                 <tr key={h.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                   <td style={{ padding: '10px 16px', color: '#9ca3af' }}>{i + 1}</td>
-                  <td style={{ padding: '10px 16px', color: '#374151' }}>{h.date}</td>
+                  <td style={{ padding: '10px 16px', color: '#374151' }}>{formatDate(h.date)}</td>
                   <td style={{
                     padding: '10px 16px', fontWeight: '600',
                     color: ['周六', '周日'].includes(getWeekdayName(h.date)) ? '#dc2626' : '#374151',
@@ -241,7 +252,7 @@ export default function ConfigHolidays({ token }) {
                   </td>
                   <td style={{ padding: '10px 16px' }}>
                     <button className="btn-danger" style={{ padding: '4px 12px', fontSize: '12px' }}
-                      onClick={() => handleDeleteHoliday(h.id, h.name, h.date)}>删除</button>
+                      onClick={() => handleDeleteHoliday(h.id, h.name, formatDate(h.date))}>删除</button>
                   </td>
                 </tr>
               ))}
