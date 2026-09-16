@@ -1,4 +1,4 @@
-import { query } from '../../../lib/db';
+import { query, queryBatch } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
 import { sendMail } from '../../../lib/mailer';
 import { generateScheduleEmailHTML } from '../../../lib/scheduleEmailTemplate';
@@ -101,28 +101,41 @@ export default async function handler(req, res) {
         oldMap[`${r.employee_id}_${r.day}`] = r;
       }
 
+      // UPSERT 新记录（分批多行 VALUES，避免子请求超限）
       // 记录有变化的员工
       const changedEmployees = new Set();
 
-      // UPSERT 新记录
+      // 先计算变化
       for (const rec of records) {
         const key = `${rec.employee_id}_${rec.day}`;
         const old = oldMap[key];
-
         const hasChange = !old ||
           old.shift !== rec.shift ||
           old.meal_time !== rec.meal_time ||
           old.am_work_type !== rec.am_work_type ||
           old.pm_work_type !== rec.pm_work_type;
-
         if (hasChange) changedEmployees.add(rec.employee_id);
+      }
 
+      // 分批多行 VALUES UPSERT（避免子请求超限）
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < records.length; i += BATCH_SIZE) {
+        const batch = records.slice(i, i + BATCH_SIZE);
+        const values = [];
+        const params = [];
+        batch.forEach((rec, j) => {
+          const base = j * 8;
+          values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, NOW())`);
+          params.push(year, month, rec.employee_id, rec.day, rec.shift, rec.meal_time || '', rec.am_work_type || '', rec.pm_work_type || '');
+        });
         await query(
           `INSERT INTO schedule_records (year, month, employee_id, day, shift, meal_time, am_work_type, pm_work_type, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+           VALUES ${values.join(', ')}
            ON CONFLICT (year, month, employee_id, day)
-           DO UPDATE SET shift = $5, meal_time = $6, am_work_type = $7, pm_work_type = $8, updated_at = NOW()`,
-          [year, month, rec.employee_id, rec.day, rec.shift, rec.meal_time || '', rec.am_work_type || '', rec.pm_work_type || '']
+           DO UPDATE SET shift = EXCLUDED.shift, meal_time = EXCLUDED.meal_time,
+                         am_work_type = EXCLUDED.am_work_type, pm_work_type = EXCLUDED.pm_work_type,
+                         updated_at = NOW()`,
+          params
         );
       }
 
@@ -184,11 +197,19 @@ export default async function handler(req, res) {
         // 从API获取当年假日
         try {
           const apiHolidays = await fetchHolidaysFromAPI(year);
-          for (const h of apiHolidays) {
+          // 批量插入（单次HTTP请求，避免子请求超限）
+          if (apiHolidays.length > 0) {
+            const values = [];
+            const params = [];
+            apiHolidays.forEach((h, i) => {
+              const base = i * 3;
+              values.push(`($${base + 1}, $${base + 2}, $${base + 3})`);
+              params.push(h.date, h.name, h.isHoliday);
+            });
             await query(
-              `INSERT INTO schedule_holidays (date, name, is_holiday) VALUES ($1, $2, $3)
+              `INSERT INTO schedule_holidays (date, name, is_holiday) VALUES ${values.join(', ')}
                ON CONFLICT (date) DO NOTHING`,
-              [h.date, h.name, h.isHoliday]
+              params
             );
           }
           // 重新查询
@@ -215,12 +236,22 @@ export default async function handler(req, res) {
       // 删除旧记录
       await query('DELETE FROM schedule_records WHERE year = $1 AND month = $2', [year, month]);
 
-      // 批量插入新记录
-      for (const rec of schedule) {
+      // 批量插入新记录（分批多行 VALUES，避免子请求超限）
+      // 12人×31天 = 372条，每批200条多行INSERT，共2次子请求
+      const BATCH_SIZE = 200;
+      for (let i = 0; i < schedule.length; i += BATCH_SIZE) {
+        const batch = schedule.slice(i, i + BATCH_SIZE);
+        const values = [];
+        const params = [];
+        batch.forEach((rec, j) => {
+          const base = j * 8;
+          values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8})`);
+          params.push(year, month, rec.employee_id, rec.day, rec.shift, rec.meal_time, rec.am_work_type, rec.pm_work_type);
+        });
         await query(
           `INSERT INTO schedule_records (year, month, employee_id, day, shift, meal_time, am_work_type, pm_work_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [year, month, rec.employee_id, rec.day, rec.shift, rec.meal_time, rec.am_work_type, rec.pm_work_type]
+           VALUES ${values.join(', ')}`,
+          params
         );
       }
 
@@ -630,30 +661,34 @@ async function sendAdjustmentEmails(year, month, changedEmployeeIds) {
     [changedEmployeeIds]
   );
 
+  // 一次性获取所有受影响员工的排班记录（避免逐员工查询导致子请求超限）
+  const allRecsResult = await query(
+    `SELECT day, shift, meal_time, am_work_type, pm_work_type, employee_id
+     FROM schedule_records
+     WHERE year = $1 AND month = $2 AND employee_id = ANY($3)
+     ORDER BY employee_id ASC, day ASC`,
+    [year, month, changedEmployeeIds]
+  );
+
+  // 按 employee_id 分组
+  const recsByEmp = {};
+  for (const r of allRecsResult.rows) {
+    if (!recsByEmp[r.employee_id]) recsByEmp[r.employee_id] = {};
+    recsByEmp[r.employee_id][r.day] = {
+      shift: r.shift,
+      meal_time: r.meal_time,
+      am_work_type: r.am_work_type,
+      pm_work_type: r.pm_work_type,
+    };
+  }
+
   let sentCount = 0;
   const days = getDaysInMonth(year, month);
   const weekdays = getWeekdays(year, month, days);
 
   for (const emp of empResult.rows) {
     try {
-      // 获取该员工排班记录
-      const recsResult = await query(
-        `SELECT day, shift, meal_time, am_work_type, pm_work_type
-         FROM schedule_records
-         WHERE year = $1 AND month = $2 AND employee_id = $3
-         ORDER BY day ASC`,
-        [year, month, emp.employee_id]
-      );
-
-      const recordsMap = {};
-      for (const r of recsResult.rows) {
-        recordsMap[r.day] = {
-          shift: r.shift,
-          meal_time: r.meal_time,
-          am_work_type: r.am_work_type,
-          pm_work_type: r.pm_work_type,
-        };
-      }
+      const recordsMap = recsByEmp[emp.employee_id] || {};
 
       const stats = computePersonalStatsForEmail(recordsMap, days);
       const goals = computePersonalGoalsForEmail(stats);
