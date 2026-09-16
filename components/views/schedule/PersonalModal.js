@@ -94,10 +94,10 @@ export default function PersonalModal({ employee, year, month, token, onClose })
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: '720px', maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
-        {/* 标题栏 */}
+        {/* 标题栏：销售服务中心[姓名]工号[工号][年][月]排班表 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '16px', color: '#1e3a5f' }}>
-            {employee.name} ({employee.employee_id}) - {year}年{month}月
+            销售服务中心{employee.name}工号{employee.employee_id}{year}年{month}月排班表
           </h2>
           <button onClick={onClose} style={{ fontSize: '20px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>x</button>
         </div>
@@ -231,7 +231,7 @@ function CalendarTab({ data }) {
   );
 }
 
-// ── 标签2: 个人排班汇总统计 ──
+// ── 标签2: 个人排班汇总统计（标签列内容处于33%处，数值列内容处于66%处） ──
 function StatsTab({ data }) {
   const { stats } = data;
   if (!stats) return <div style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>暂无数据</div>;
@@ -246,80 +246,72 @@ function StatsTab({ data }) {
     ['晚班天数', stats.lateShiftDays],
   ];
 
+  const Row = ({ label, value, isHeader }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      padding: isHeader ? '10px 0' : '9px 0',
+      borderBottom: isHeader ? '2px solid #e5e7eb' : '1px solid #f3f4f6',
+      color: isHeader ? '#6b7280' : '#374151',
+      fontWeight: isHeader ? '600' : 'normal',
+      fontSize: '13px',
+    }}>
+      <div style={{ width: '33%' }} />
+      <div style={{ width: '33%' }}>{label}</div>
+      <div style={{
+        flex: 1,
+        fontWeight: isHeader ? '600' : '600',
+        color: isHeader ? '#6b7280' : '#1e3a5f',
+      }}>{value}</div>
+    </div>
+  );
+
   return (
     <div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-            <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>统计项</th>
-            <th style={{ padding: '10px 16px', textAlign: 'right', color: '#6b7280' }}>天数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map(([label, val], i) => (
-            <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-              <td style={{ padding: '8px 16px', color: '#374151' }}>{label}</td>
-              <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: '600', color: '#1e3a5f' }}>{val}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Row label="统计项" value="天数" isHeader />
+      {items.map(([label, val], i) => (
+        <Row key={i} label={label} value={val} />
+      ))}
     </div>
   );
 }
 
-// ── 标签3: 个人月度目标 ──
+// ── 标签3: 个人月度目标（标签列内容处于33%处，数值列内容处于66%处） ──
 function GoalsTab({ data }) {
   const { stats, goals } = data;
   if (!stats || !goals) return <div style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>暂无数据</div>;
 
+  const Row = ({ label, value, isHeader, color }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      padding: isHeader ? '8px 0' : '8px 0',
+      borderBottom: isHeader ? '2px solid #e5e7eb' : '1px solid #f3f4f6',
+      color: isHeader ? '#6b7280' : '#374151',
+      fontWeight: isHeader ? '600' : 'normal',
+      fontSize: '13px',
+    }}>
+      <div style={{ width: '33%' }} />
+      <div style={{ width: '33%' }}>{label}</div>
+      <div style={{ flex: 1, fontWeight: '600', color: color || '#1e3a5f' }}>{value}</div>
+    </div>
+  );
+
   return (
     <div>
       <h4 style={{ fontSize: '14px', color: '#374151', marginBottom: '12px' }}>{data.month}月排班记录</h4>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', marginBottom: '20px' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-            <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>工种</th>
-            <th style={{ padding: '8px 16px', textAlign: 'right', color: '#6b7280' }}>天数</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[
-            ['语音天数', stats.voiceDays], ['工单留邮天数', stats.ticketDays],
-            ['IM文字天数', stats.imDays], ['外呼调研天数', stats.outboundDays],
-            ['拨测体验天数', stats.testDays], ['质检天数', stats.qaDays],
-          ].map(([label, val], i) => (
-            <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
-              <td style={{ padding: '8px 16px', color: '#374151' }}>{label}</td>
-              <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: '600' }}>{val}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Row label="工种" value="天数" isHeader />
+      {[
+        ['语音天数', stats.voiceDays], ['工单留邮天数', stats.ticketDays],
+        ['IM文字天数', stats.imDays], ['外呼调研天数', stats.outboundDays],
+        ['拨测体验天数', stats.testDays], ['质检天数', stats.qaDays],
+      ].map(([label, val], i) => (
+        <Row key={i} label={label} value={val} />
+      ))}
 
-      <h4 style={{ fontSize: '14px', color: '#374151', marginBottom: '12px' }}>{data.month}月需完成绩效考核目标</h4>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-            <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>考核项</th>
-            <th style={{ padding: '8px 16px', textAlign: 'right', color: '#6b7280' }}>目标值</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-            <td style={{ padding: '8px 16px', color: '#374151' }}>工作量</td>
-            <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: '600', color: '#2563eb' }}>{goals.workload}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-            <td style={{ padding: '8px 16px', color: '#374151' }}>语音上机时间</td>
-            <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: '600', color: '#2563eb' }}>{goals.voiceMachineTime}</td>
-          </tr>
-          <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-            <td style={{ padding: '8px 16px', color: '#374151' }}>IM上机时间</td>
-            <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: '600', color: '#2563eb' }}>{goals.imMachineTime}</td>
-          </tr>
-        </tbody>
-      </table>
+      <h4 style={{ fontSize: '14px', color: '#374151', margin: '20px 0 12px' }}>{data.month}月需完成绩效考核目标</h4>
+      <Row label="考核项" value="目标值" isHeader />
+      <Row label="工作量" value={goals.workload} color="#2563eb" />
+      <Row label="语音上机时间" value={goals.voiceMachineTime} color="#2563eb" />
+      <Row label="IM上机时间" value={goals.imMachineTime} color="#2563eb" />
 
       <div style={{ marginTop: '12px', fontSize: '11px', color: '#9ca3af', lineHeight: '1.6' }}>
         备注：语音/IM文字/外呼调研/工单留邮/质检 目标90件/天，拨测体验目标72件/天；语音/IM文字 目标7.5小时/天
