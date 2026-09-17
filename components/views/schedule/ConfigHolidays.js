@@ -10,12 +10,17 @@ import { useState, useEffect, useCallback } from 'react';
 
 // 从日期字符串计算星期（兼容 PostgreSQL date 序列化后的 ISO 格式 "2026-01-01T00:00:00.000Z"）
 // 手动解析年月日，避免 new Date(string) 的时区偏移问题
-const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const WEEKDAY_NAMES = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 function getWeekdayName(dateStr) {
   const datePart = String(dateStr).split('T')[0]; // "2026-01-01"
   const [y, m, d] = datePart.split('-').map(Number);
-  const wd = new Date(y, m - 1, d).getDay(); // 0=周日
+  const wd = new Date(y, m - 1, d).getDay(); // 0=星期日
   return WEEKDAY_NAMES[wd];
+}
+// 周末判断（星期X格式）
+const WEEKEND_NAMES = ['星期六', '星期日'];
+function isWeekend(dateStr) {
+  return WEEKEND_NAMES.includes(getWeekdayName(dateStr));
 }
 // 日期显示格式化：截取 YYYY-MM-DD
 function formatDate(dateStr) {
@@ -185,7 +190,7 @@ export default function ConfigHolidays({ token }) {
               <input type="date" className="input-field" style={{ width: '150px', fontSize: '13px', padding: '4px 8px' }}
                 value={newDate} onChange={e => setNewDate(e.target.value)} />
               {newDate && (
-                <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: '600', color: ['周六', '周日'].includes(getWeekdayName(newDate)) ? '#dc2626' : '#6b7280' }}>
+                <span style={{ marginLeft: '8px', fontSize: '12px', fontWeight: '600', color: isWeekend(newDate) ? '#dc2626' : '#6b7280' }}>
                   {getWeekdayName(newDate)}
                 </span>
               )}
@@ -240,7 +245,7 @@ export default function ConfigHolidays({ token }) {
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{formatDate(h.date)}</td>
                   <td style={{
                     padding: '10px 16px', fontWeight: '600',
-                    color: ['周六', '周日'].includes(getWeekdayName(h.date)) ? '#dc2626' : '#374151',
+                    color: isWeekend(h.date) ? '#dc2626' : '#374151',
                   }}>{getWeekdayName(h.date)}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{h.name}</td>
                   <td style={{ padding: '10px 16px' }}>
