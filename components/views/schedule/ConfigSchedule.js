@@ -296,11 +296,11 @@ export default function ConfigSchedule({ token }) {
       {/* 排班表编辑表格（冻结姓名/工号列 + 日期表头行） */}
       {data && !data.isEmpty && data.employees && data.employees.length > 0 && (
         <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 280px)', background: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px' }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px', minWidth: 80 + 104 + data.days.length * 65 }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, position: 'sticky', top: 0, left: 0, zIndex: 30, width: '80px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>姓名</th>
-                <th style={{ ...thStyle, position: 'sticky', top: 0, left: '80px', zIndex: 30, width: '104px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>工号</th>
+                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: 0, zIndex: 30, width: '80px', minWidth: '80px', maxWidth: '80px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>姓名</th>
+                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: '80px', zIndex: 30, width: '104px', minWidth: '104px', maxWidth: '104px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>工号</th>
                 {data.days.map((_, i) => (
                   <th key={i} style={{ ...thStyle, position: 'sticky', top: 0, zIndex: 20, textAlign: 'center', height: '32px', padding: '0 1px', minWidth: '55px', background: '#f9fafb' }}>
                     {i + 1}日
@@ -318,8 +318,8 @@ export default function ConfigSchedule({ token }) {
             <tbody>
               {data.employees.map((emp) => (
                 <tr key={emp.employee_id}>
-                  <td style={{ ...tdStyle, position: 'sticky', left: 0, zIndex: 10, background: '#fff' }}>{emp.name}</td>
-                  <td style={{ ...tdStyle, position: 'sticky', left: '80px', zIndex: 10, background: '#fff' }}>{emp.employee_id}</td>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '80px', minWidth: '80px', maxWidth: '80px', background: '#fff' }}>{emp.name}</td>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: '80px', zIndex: 10, width: '104px', minWidth: '104px', maxWidth: '104px', background: '#fff' }}>{emp.employee_id}</td>
                   {data.days.map((_, dayIdx) => {
                     const day = dayIdx + 1;
                     const shiftVal = getCell(emp.employee_id, day, 'shift');
