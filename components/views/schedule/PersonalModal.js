@@ -94,10 +94,10 @@ export default function PersonalModal({ employee, year, month, token, onClose })
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ width: '720px', maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
-        {/* 标题栏：销售服务中心[姓名]工号[工号][年][月]排班表 */}
+        {/* 标题栏：销售服务中心 [姓名] （工号[工号]） [年][月] 排班表 */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h2 style={{ fontSize: '16px', color: '#1e3a5f' }}>
-            销售服务中心{employee.name}工号{employee.employee_id}{year}年{month}月排班表
+            销售服务中心 {employee.name} （工号{employee.employee_id}） {year}年{month}月 排班表
           </h2>
           <button onClick={onClose} style={{ fontSize: '20px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>x</button>
         </div>
@@ -231,7 +231,7 @@ function CalendarTab({ data }) {
   );
 }
 
-// ── 标签2: 个人排班汇总统计（标签列内容处于33%处，数值列内容处于66%处） ──
+// ── 标签2: 个人排班汇总统计（标签列内容处于25%处，数值列内容处于50%处） ──
 function StatsTab({ data }) {
   const { stats } = data;
   if (!stats) return <div style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>暂无数据</div>;
@@ -255,8 +255,8 @@ function StatsTab({ data }) {
       fontWeight: isHeader ? '600' : 'normal',
       fontSize: '13px',
     }}>
-      <div style={{ width: '33%' }} />
-      <div style={{ width: '33%' }}>{label}</div>
+      <div style={{ width: '25%' }} />
+      <div style={{ width: '25%' }}>{label}</div>
       <div style={{
         flex: 1,
         fontWeight: isHeader ? '600' : '600',
@@ -275,7 +275,7 @@ function StatsTab({ data }) {
   );
 }
 
-// ── 标签3: 个人月度目标（标签列内容处于33%处，数值列内容处于66%处） ──
+// ── 标签3: 个人月度目标（标签列内容处于25%处，数值列内容处于50%处） ──
 function GoalsTab({ data }) {
   const { stats, goals } = data;
   if (!stats || !goals) return <div style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>暂无数据</div>;
@@ -289,8 +289,8 @@ function GoalsTab({ data }) {
       fontWeight: isHeader ? '600' : 'normal',
       fontSize: '13px',
     }}>
-      <div style={{ width: '33%' }} />
-      <div style={{ width: '33%' }}>{label}</div>
+      <div style={{ width: '25%' }} />
+      <div style={{ width: '25%' }}>{label}</div>
       <div style={{ flex: 1, fontWeight: '600', color: color || '#1e3a5f' }}>{value}</div>
     </div>
   );
