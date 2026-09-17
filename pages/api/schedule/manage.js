@@ -171,11 +171,33 @@ export default async function handler(req, res) {
       );
 
       // 获取默认规则
-      const rulesResult = await query(
+      let rulesResult = await query(
         `SELECT employee_id, default_on_machine_days, allowed_work_types, allowed_weekdays
          FROM schedule_default_rules WHERE year = $1 AND month = $2`,
         [year, month]
       );
+
+      // 若目标月无默认规则，自动回退到上月规则（保证"重新排班"可用）
+      if (rulesResult.rows.length === 0) {
+        const prevKey = year * 12 + (month - 2);
+        const prevYear = Math.floor(prevKey / 12);
+        const prevMonth = (prevKey % 12) + 1;
+        rulesResult = await query(
+          `SELECT employee_id, default_on_machine_days, allowed_work_types, allowed_weekdays
+           FROM schedule_default_rules WHERE year = $1 AND month = $2`,
+          [prevYear, prevMonth]
+        );
+        if (rulesResult.rows.length > 0) {
+          console.log(`[排班] ${year}-${month} 无默认规则，已回退使用 ${prevYear}-${prevMonth} 的规则`);
+        }
+      }
+
+      // 目标月与上月都无规则时，明确报错（避免静默生成空排班表）
+      if (rulesResult.rows.length === 0) {
+        return res.status(400).json({
+          error: '该月及上月均未配置默认排班规则，请先在"配置默认规则"中保存规则后再重新排班',
+        });
+      }
 
       const rulesMap = {};
       for (const r of rulesResult.rows) {
@@ -186,15 +208,15 @@ export default async function handler(req, res) {
         };
       }
 
-      // 获取国定假日 - 先查数据库，如该年无数据则从API获取
+      // 获取国定假日 - 只取目标年月的记录（避免其他月份假日污染本月休息日集合）
       let holidaysResult = await query(
         `SELECT date, name, is_holiday FROM schedule_holidays
-         WHERE EXTRACT(YEAR FROM date) = $1`,
-        [year]
+         WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2`,
+        [year, month]
       );
 
+      // 如果目标月没有假日记录，从API拉取全年假日（自动入库），再按目标月过滤
       if (holidaysResult.rows.length === 0) {
-        // 从API获取当年假日
         try {
           const apiHolidays = await fetchHolidaysFromAPI(year);
           // 批量插入（单次HTTP请求，避免子请求超限）
@@ -212,14 +234,14 @@ export default async function handler(req, res) {
               params
             );
           }
-          // 重新查询
+          // 重新按目标月查询
           holidaysResult = await query(
             `SELECT date, name, is_holiday FROM schedule_holidays
-             WHERE EXTRACT(YEAR FROM date) = $1`,
-            [year]
+             WHERE EXTRACT(YEAR FROM date) = $1 AND EXTRACT(MONTH FROM date) = $2`,
+            [year, month]
           );
         } catch (apiErr) {
-          console.error('获取假日API失败，将仅按周末排休:', apiErr.message);
+          console.error('获取节假日安排失败，将仅按周末排休:', apiErr.message);
           // API失败时不阻断排班，仅按周末排休
         }
       }
@@ -227,9 +249,13 @@ export default async function handler(req, res) {
       const holidaySet = new Set();      // 法定假日（is_holiday=true，当天放假）
       const workdaySet = new Set();      // 调休上班日（is_holiday=false，周末需上班）
       for (const h of holidaysResult.rows) {
-        const d = new Date(h.date).getDate();
-        if (h.is_holiday) holidaySet.add(d);
-        else workdaySet.add(d);
+        const dt = new Date(h.date);
+        const d = dt.getDate();
+        // 只使用目标年月的假日（防止其他月份假日的"几号"污染本月休息日）
+        if (dt.getFullYear() === year && (dt.getMonth() + 1) === month) {
+          if (h.is_holiday) holidaySet.add(d);
+          else workdaySet.add(d);
+        }
       }
 
       // 执行排班算法
@@ -391,8 +417,8 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet, work
     const workTypeAssignment = distributeWorkTypes(targetDays, workTypes);
 
     // ── 规则4: 默认上机天数>15天者每月安排2天晚班 ──
+    // 晚班统一在第二阶段（主循环之后）分配，避免与日班平均分布冲突
     const needsLateShift = targetDays > 15;
-    let lateShiftCount = 0;
 
     let dayIndex = 0;
     let typeIndex = 0;
@@ -408,31 +434,16 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet, work
         const wt = workTypeAssignment[typeIndex % workTypeAssignment.length];
         typeIndex++;
 
-        let shift = '日班';
-        let mealTime = '11:30餐';
-
-        // ── 规则4: 安排晚班（避免连续2天晚班：前一天已晚班则本次不排） ──
-        const prevRecForLate = d > 1 ? empSchedule[emp.employee_id][d - 1] : null;
-        const prevIsLate = prevRecForLate && prevRecForLate.shift === '晚班';
-        if (needsLateShift && lateShiftCount < 2 && !prevIsLate) {
-          shift = '晚班';
-          mealTime = '17:30餐';
-          lateShiftCount++;
-        }
+        // 默认日班
+        const shift = '日班';
+        const mealTime = '11:30餐';
 
         // ── 规则3: 当天晚班→次日不排早班或日班 ──
-        // (在分配时检查前一天是否为晚班)
+        // 次日不安排上机（跳过），由规则10统一填充专项工作（工作日正常上班，不再标"休"）
         if (d > 1) {
           const prevDay = empSchedule[emp.employee_id][d - 1];
           if (prevDay && prevDay.shift === '晚班' && (shift === '早班' || shift === '日班')) {
-            // 跳过这天，标为"休"，避免规则10误补为"日班+专项"
-            empSchedule[emp.employee_id][d] = {
-              shift: '休',
-              meal_time: '休',
-              am_work_type: 'AM休',
-              pm_work_type: 'PM休',
-            };
-            continue;
+            continue; // 不分配上机，规则10会填"日班+专项工作"
           }
         }
 
@@ -460,6 +471,91 @@ function runScheduleAlgorithm(year, month, employees, rulesMap, holidaySet, work
           am_work_type: 'AM专项工作',
           pm_work_type: 'PM专项工作',
         };
+      }
+    }
+  }
+
+  // ── 规则4（第二阶段）: 为>15天上机员工每人分配2个分散晚班 ──
+  // 晚班不占用上机天数（晚班当天仍计为上机），从已分配的上机日中挑选
+  // 约束1：同一员工2个晚班尽量间隔≥5天
+  // 约束2：同一天晚班人数≤3（避免集中）
+  // 约束3：晚班次日该员工不排早班/日班（由规则3处理：改为专项工作）
+  const lateShiftEmployees = employees.filter(e => {
+    const rule = rulesMap[e.employee_id];
+    return rule && rule.defaultDays > 15;
+  });
+
+  if (lateShiftEmployees.length > 0) {
+    // 预计算每日晚班人数（按员工分配顺序累计，保证同一天≤3人）
+    const dailyLateCount = new Array(days + 1).fill(0);
+    const lateEmpOrder = lateShiftEmployees.map(e => e.employee_id).sort();
+
+    for (const empId of lateEmpOrder) {
+      const empScheduleForEmp = empSchedule[empId];
+      if (!empScheduleForEmp) continue;
+
+      // 候选日期：该员工当天有班（非休非假），且非晚班，且当天晚班人数<3
+      const candidates = [];
+      for (let d = 1; d <= days; d++) {
+        const rec = empScheduleForEmp[d];
+        if (!rec || rec.shift === '休' || rec.shift === '假' || rec.shift === '晚班') continue;
+        if (dailyLateCount[d] >= 3) continue;
+        // 避免连续2天晚班：前一天或后一天已是晚班则跳过
+        const prevIsLate = d > 1 && empScheduleForEmp[d - 1] && empScheduleForEmp[d - 1].shift === '晚班';
+        const nextIsLate = d < days && empScheduleForEmp[d + 1] && empScheduleForEmp[d + 1].shift === '晚班';
+        if (prevIsLate || nextIsLate) continue;
+        // 避免周末（晚班只安排在工作日，符合实际）
+        if (weekdays[d - 1] > 5) continue;
+        candidates.push(d);
+      }
+
+      // 选出2个尽量分散的日期（贪心：取间隔最大的）
+      const chosen = [];
+      if (candidates.length > 0) {
+        // 从候选池中选2个间隔最大的日期
+        chosen.push(candidates[0]);
+        if (candidates.length >= 2) {
+          // 找与第一个间隔最远的日期
+          let best = candidates[1];
+          let bestGap = -1;
+          for (const c of candidates) {
+            if (c === chosen[0]) continue;
+            const gap = Math.abs(c - chosen[0]);
+            if (gap > bestGap) { bestGap = gap; best = c; }
+          }
+          chosen.push(best);
+        }
+      }
+
+      for (const d of chosen) {
+        const rec = empScheduleForEmp[d];
+        if (rec) {
+          rec.shift = '晚班';
+          rec.meal_time = '17:30餐';
+          // 晚班当天AM/PM工种保留（晚班以晚班为主，工种保留原值）
+          dailyLateCount[d]++;
+        }
+      }
+    }
+  }
+
+  // ── 规则3（后处理）: 晚班次日不排早班/日班 ──
+  // 晚班次日若为工作日，改为"日班+专项工作"（保证休息缓冲，又不误标为休）
+  for (const empId of Object.keys(empSchedule)) {
+    const empData = empSchedule[empId];
+    for (let d = 1; d <= days; d++) {
+      const prev = d > 1 ? empData[d - 1] : null;
+      const cur = empData[d];
+      if (prev && prev.shift === '晚班' && cur && cur.shift === '日班') {
+        const isRest = holidaySet.has(d) || (weekdays[d - 1] > 5 && !workdaySet.has(d));
+        if (!isRest) {
+          // 工作日：改为专项工作（不排上机）
+          cur.shift = '日班';
+          cur.meal_time = '11:30餐';
+          cur.am_work_type = 'AM专项工作';
+          cur.pm_work_type = 'PM专项工作';
+        }
+        // 若次日恰逢休息日，维持原"休"（已在规则7标休，不会出现日班）
       }
     }
   }
