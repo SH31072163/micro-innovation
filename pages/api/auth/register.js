@@ -64,7 +64,7 @@ export default async function handler(req, res) {
 
     await query('INSERT INTO email_tokens (user_id, token, type, expires_at) VALUES ($1, $2, $3, $4)', [userId, token, 'register', expiresAt]);
 
-    const verifyUrl = `${req.headers.origin || 'http://localhost:3000'}/api/auth/verify?token=${token}`;
+    const verifyUrl = `${req.headers.origin || 'https://micro-innovation.pages.dev'}/api/auth/verify?token=${token}`;
     const mailHtml = `
       <h2>娆㈣繋娉ㄥ唽銆岄攢鍞湇鍔′腑蹇冨井鍒涙柊瀹為獙鐢般€?/h2>
       <p>璇峰湪24灏忔椂鍐呯偣鍑讳互涓嬮摼鎺ュ畬鎴愰偖绠遍獙璇侊細</p>
