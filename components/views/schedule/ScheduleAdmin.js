@@ -6,17 +6,23 @@ import ConfigEmployees from './ConfigEmployees';
 import ConfigEmail from './ConfigEmail';
 import ConfigRules from './ConfigRules';
 import ConfigHolidays from './ConfigHolidays';
+import SyncHRConfig from './SyncHRConfig';
 
 /**
- * 排班表管理区 - 7个配置页面
- * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 人员增删 | 邮件提醒 | 默认规则 | 假日配置
+ * 排班表管理区 - 8个配置页面
+ * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 人员增删 | 邮件提醒 | 自排规则 | 假日配置 | 同步人力
  */
-export default function ScheduleAdmin({ token }) {
+export default function ScheduleAdmin({ token, onTabChange }) {
   const [tab, setTab] = useState(0);
 
   const tabs = [
-    '配置排班', '数据字典', '换算规则', '人员增删', '邮件提醒', '默认规则', '假日配置',
+    '配置排班', '数据字典', '换算规则', '人员增删', '邮件提醒', '自排规则', '假日配置', '同步人力',
   ];
+
+  const handleTabChange = (i) => {
+    setTab(i);
+    if (onTabChange) onTabChange(tabs[i]);
+  };
 
   return (
     <div style={{ padding: '24px' }}>
@@ -27,7 +33,7 @@ export default function ScheduleAdmin({ token }) {
         {tabs.map((t, i) => (
           <button
             key={i}
-            onClick={() => setTab(i)}
+            onClick={() => handleTabChange(i)}
             style={{
               padding: '8px 16px',
               fontSize: '13px',
@@ -55,6 +61,7 @@ export default function ScheduleAdmin({ token }) {
         {tab === 4 && <ConfigEmail token={token} />}
         {tab === 5 && <ConfigRules token={token} />}
         {tab === 6 && <ConfigHolidays token={token} />}
+        {tab === 7 && <SyncHRConfig token={token} />}
       </div>
     </div>
   );
