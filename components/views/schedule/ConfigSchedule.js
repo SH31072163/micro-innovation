@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
+import * as XLSX from 'xlsx-js-style';
 
 /**
  * 配置排班 - 管理区第1个页面
  * - 参照中心排班表排班区域+汇总统计区
  * - 动态天数列
- * - 含"重新排班"按钮
+ * - 含"自动排班"按钮（仅次月允许自动排班）
  * - 修改后保存生效
- * - 次月20日后不可修改
+ * - 某月排班记录在次月5日后不可修改
  */
 export default function ConfigSchedule({ token }) {
   const [year, setYear] = useState(null);
@@ -17,6 +18,7 @@ export default function ConfigSchedule({ token }) {
   const [editing, setEditing] = useState({}); // employee_id -> day -> { shift, meal_time, am, pm }
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState(''); // 'success' | 'error'
+  const [modalEmployee, setModalEmployee] = useState(null); // 弹窗编辑（点击姓名打开）
 
   const availableMonths = [];
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function ConfigSchedule({ token }) {
   }, [fetchData]);
 
   const handleReschedule = async () => {
-    if (!confirm(`确认对${year}年${month}月进行重新排班？这将覆盖当前排班数据。`)) return;
+    if (!confirm(`确认对${year}年${month}月进行自动排班？这将覆盖当前排班数据。`)) return;
     setLoading(true);
     setMsg('');
     try {
@@ -77,23 +79,28 @@ export default function ConfigSchedule({ token }) {
       });
       const result = await res.json();
       if (res.ok) {
-        setMsg(`重新排班成功，共生成 ${result.totalRecords} 条记录`);
+        const tip = `自动排班成功，共生成 ${result.totalRecords} 条记录`;
+        setMsg(tip);
         setMsgType('success');
+        alert(tip);
         fetchData();
       } else {
-        setMsg(result.error || '重新排班失败');
+        const tip = result.error || '自动排班失败';
+        setMsg(tip);
         setMsgType('error');
+        alert(tip);
       }
     } catch (err) {
       setMsg('网络错误');
       setMsgType('error');
+      alert('自动排班失败：网络错误');
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
-    // 收集所有编辑过的记录
+    // 收集所有编辑过的记录（含备注字段）
     const records = [];
     for (const [empId, days] of Object.entries(editing)) {
       for (const [day, val] of Object.entries(days)) {
@@ -104,6 +111,7 @@ export default function ConfigSchedule({ token }) {
           meal_time: val.meal_time,
           am_work_type: val.am_work_type,
           pm_work_type: val.pm_work_type,
+          remark: val.remark || '',
         });
       }
     }
@@ -111,6 +119,7 @@ export default function ConfigSchedule({ token }) {
     if (records.length === 0) {
       setMsg('没有修改需要保存');
       setMsgType('error');
+      alert('没有修改需要保存');
       return;
     }
 
@@ -124,17 +133,22 @@ export default function ConfigSchedule({ token }) {
       });
       const result = await res.json();
       if (res.ok) {
-        setMsg(`保存成功${result.changedCount > 0 ? `，${result.changedCount}人排班有变动` : ''}`);
+        const tip = `保存成功${result.changedCount > 0 ? `，${result.changedCount}人排班有变动` : ''}`;
+        setMsg(tip);
         setMsgType('success');
+        alert(tip);
         setEditing({});
         fetchData();
       } else {
-        setMsg(result.error || '保存失败');
+        const tip = result.error || '保存失败';
+        setMsg(tip);
         setMsgType('error');
+        alert(tip);
       }
     } catch (err) {
       setMsg('网络错误');
       setMsgType('error');
+      alert('保存失败：网络错误');
     } finally {
       setLoading(false);
     }
@@ -143,6 +157,20 @@ export default function ConfigSchedule({ token }) {
   const handleCancel = () => {
     setEditing({});
     setMsg('');
+  };
+
+  // ── 导出Excel：第1个Sheet完整排班表 + 每员工3个Sheet（排班表/汇总统计/月度目标） ──
+  // 为确保导出数据与数据库当前保存的数据一致：存在未保存修改时提示先保存
+  const handleExport = () => {
+    const hasUnsaved = Object.keys(editing).some((empId) => Object.keys(editing[empId]).length > 0);
+    if (hasUnsaved) {
+      alert('您有未保存的修改，请先点击"保存"后再导出，以确保导出数据与数据库当前保存的数据一致。');
+      return;
+    }
+    if (!data || data.isEmpty) return;
+    const wb = buildWorkbook(data, year, month);
+    if (!wb) return;
+    XLSX.writeFile(wb, `配置排班表_${year}年${month}月.xlsx`);
   };
 
   // 获取餐时下拉选项：完整字典
@@ -163,7 +191,7 @@ export default function ConfigSchedule({ token }) {
     if (!editing[empId]) editing[empId] = {};
     if (!editing[empId][day]) {
       const orig = data.records[empId]?.[day] || {};
-      editing[empId][day] = { shift: orig.shift || '', meal_time: orig.meal_time || '', am_work_type: orig.am_work_type || '', pm_work_type: orig.pm_work_type || '' };
+      editing[empId][day] = { shift: orig.shift || '', meal_time: orig.meal_time || '', am_work_type: orig.am_work_type || '', pm_work_type: orig.pm_work_type || '', remark: orig.remark || '' };
     }
     const cell = editing[empId][day];
     cell[field] = value;
@@ -218,6 +246,30 @@ export default function ConfigSchedule({ token }) {
 
   const weekdayNames = ['', '一', '二', '三', '四', '五', '六', '日'];
 
+  // ── 汇总统计字段定义（与个人弹窗13项一致，短标签用于表头/列） ──
+  const SUM_ITEMS = [
+    { key: 'onMachineDays', label: '实际上机' },
+    { key: 'leaveDays', label: '请假' },
+    { key: 'voiceDays', label: '语音' },
+    { key: 'ticketDays', label: '工单留邮' },
+    { key: 'imDays', label: 'IM文字' },
+    { key: 'qaDays', label: '质检' },
+    { key: 'outboundDays', label: '外呼' },
+    { key: 'specialTaskDays', label: '专项' },
+    { key: 'testDays', label: '拨测' },
+    { key: 'dutyDays', label: '代班' },
+    { key: 'dayShiftDays', label: '日班' },
+    { key: 'earlyShiftDays', label: '早班' },
+    { key: 'lateShiftDays', label: '晚班' },
+  ];
+
+  // 格式化统计值（去掉多余的 .0，保留 .5）
+  const fmtSum = (v) => {
+    if (v === null || v === undefined) return '';
+    const n = Math.round(v * 10) / 10;
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  };
+
   // 可选月份
   const getMonths = () => {
     const now = new Date();
@@ -256,10 +308,10 @@ export default function ConfigSchedule({ token }) {
           })}
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          {data?.canEdit && (
+          {data?.canReschedule && (
             <button className="btn-primary" style={{ padding: '6px 16px', fontSize: '13px' }}
               onClick={handleReschedule} disabled={loading}>
-              重新排班
+              自动排班
             </button>
           )}
           <button className="btn-primary" style={{ padding: '6px 16px', fontSize: '13px' }}
@@ -269,6 +321,10 @@ export default function ConfigSchedule({ token }) {
           <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '13px' }}
             onClick={handleCancel} disabled={loading}>
             取消
+          </button>
+          <button className="btn-secondary" style={{ padding: '6px 16px', fontSize: '13px' }}
+            onClick={handleExport} disabled={loading || !data || data.isEmpty}>
+            导出Excel
           </button>
         </div>
       </div>
@@ -283,28 +339,32 @@ export default function ConfigSchedule({ token }) {
 
       {!data?.canEdit && data && (
         <div style={{ padding: '8px 12px', background: '#fffbeb', borderRadius: '4px', marginBottom: '16px', color: '#d97706', fontSize: '13px' }}>
-          该月排班表已过截止日期（次月20日后），不可修改
+          该月排班表已过截止日期（次月5日后），不可修改
         </div>
       )}
 
       {data?.isEmpty && (
         <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af', background: '#fff', borderRadius: '8px' }}>
-          暂无排班数据，请点击"重新排班"生成
+          暂无排班数据，请点击"自动排班"生成
         </div>
       )}
 
       {/* 排班表编辑表格（冻结姓名/工号列 + 日期表头行） */}
       {data && !data.isEmpty && data.employees && data.employees.length > 0 && (
         <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 280px)', background: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px', minWidth: 80 + 104 + data.days.length * 65 }}>
+          <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '11px', minWidth: 60 + 70 + data.days.length * 65 + 13 * 52 }}>
             <thead>
               <tr>
-                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: 0, zIndex: 30, width: '80px', minWidth: '80px', maxWidth: '80px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>姓名</th>
-                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: '80px', zIndex: 30, width: '104px', minWidth: '104px', maxWidth: '104px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>工号</th>
+                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: 0, zIndex: 30, width: '60px', minWidth: '60px', maxWidth: '60px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>姓名</th>
+                <th style={{ ...thStyle, boxSizing: 'border-box', position: 'sticky', top: 0, left: '60px', zIndex: 30, width: '70px', minWidth: '70px', maxWidth: '70px', height: '52px', padding: '0 8px', background: '#f9fafb' }} rowSpan={2}>工号</th>
                 {data.days.map((_, i) => (
                   <th key={i} style={{ ...thStyle, position: 'sticky', top: 0, zIndex: 20, textAlign: 'center', height: '32px', padding: '0 1px', minWidth: '55px', background: '#f9fafb' }}>
                     {i + 1}日
                   </th>
+                ))}
+                {/* 人员维度汇总列（最后一天右侧，13列） */}
+                {SUM_ITEMS.map((item, i) => (
+                  <th key={'sum' + i} style={{ ...thStyle, position: 'sticky', top: 0, zIndex: 20, textAlign: 'center', height: '32px', padding: '0 2px', minWidth: '52px', background: '#eef2ff', color: '#3730a3' }}>{item.label}</th>
                 ))}
               </tr>
               <tr>
@@ -313,13 +373,22 @@ export default function ConfigSchedule({ token }) {
                     {weekdayNames[wd]}
                   </th>
                 ))}
+                {/* 汇总区星期占位 */}
+                {SUM_ITEMS.map((_, i) => (
+                  <th key={'sumwd' + i} style={{ ...thStyle, position: 'sticky', top: '32px', zIndex: 20, textAlign: 'center', height: '20px', padding: '0', fontSize: '9px', background: '#eef2ff', color: '#6366f1' }}>天</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {data.employees.map((emp) => (
+              {data.employees.map((emp, empIdx) => {
+                // 相邻行浅蓝/白交替底色
+                const rowBg = empIdx % 2 === 1 ? '#f0f7ff' : '#ffffff';
+                return (
                 <tr key={emp.employee_id}>
-                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '80px', minWidth: '80px', maxWidth: '80px', background: '#fff' }}>{emp.name}</td>
-                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: '80px', zIndex: 10, width: '104px', minWidth: '104px', maxWidth: '104px', background: '#fff' }}>{emp.employee_id}</td>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '60px', minWidth: '60px', maxWidth: '60px', background: rowBg, cursor: 'pointer', color: '#2563eb', textDecoration: 'underline' }}
+                    onClick={() => setModalEmployee(emp)}>{emp.name}</td>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: '60px', zIndex: 10, width: '70px', minWidth: '70px', maxWidth: '70px', background: rowBg, cursor: 'pointer', color: '#2563eb' }}
+                    onClick={() => setModalEmployee(emp)}>{emp.employee_id}</td>
                   {data.days.map((_, dayIdx) => {
                     const day = dayIdx + 1;
                     const shiftVal = getCell(emp.employee_id, day, 'shift');
@@ -332,7 +401,7 @@ export default function ConfigSchedule({ token }) {
                     const amOptions = dictData?.['am_work_type'] || [];
                     const pmOptions = dictData?.['pm_work_type'] || [];
                     return (
-                      <td key={dayIdx} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: isEditing ? '#fffde7' : '#fff' }}>
+                      <td key={dayIdx} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: isEditing ? '#fffde7' : rowBg }}>
                         {/* 第1个格子：班次 */}
                         <select value={shiftVal}
                           onChange={e => updateCell(emp.employee_id, day, 'shift', e.target.value)}
@@ -363,15 +432,231 @@ export default function ConfigSchedule({ token }) {
                       </td>
                     );
                   })}
+                  {/* 人员维度13项汇总列 */}
+                  {SUM_ITEMS.map((item, i) => {
+                    const pstats = data.personStats?.[emp.employee_id] || {};
+                    return (
+                      <td key={'psum' + i} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '52px', background: '#f5f3ff', fontWeight: '600', color: '#3730a3' }}>
+                        {fmtSum(pstats[item.key])}
+                      </td>
+                    );
+                  })}
                 </tr>
-              ))}
+                );
+              })}
+              {/* 天维度13项汇总行（最后一个员工下方） */}
+              {data.dayStats && (
+                <tr style={{ background: '#eef2ff' }}>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '60px', minWidth: '60px', maxWidth: '60px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}>合计</td>
+                  <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: '60px', zIndex: 10, width: '70px', minWidth: '70px', maxWidth: '70px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}></td>
+                  {data.days.map((_, dayIdx) => {
+                    const day = dayIdx + 1;
+                    const ds = data.dayStats?.[day] || {};
+                    // 每天显示该日在岗人数（实际出勤=onMachineDays，休息/请假不展示具体工种）
+                    return (
+                      <td key={`dsum${dayIdx}`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}>
+                        {fmtSum(ds.onMachineDays)}
+                      </td>
+                    );
+                  })}
+                  {/* 天维度13项汇总值（合计列对应SUM_ITEMS） */}
+                  {SUM_ITEMS.map((item, i) => {
+                    let total = 0;
+                    for (let d = 1; d <= data.days.length; d++) {
+                      total += (data.dayStats?.[d]?.[item.key] || 0);
+                    }
+                    return (
+                      <td key={`tsum${i}`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '52px', background: '#e0e7ff', fontWeight: '700', color: '#3730a3' }}>
+                        {fmtSum(total)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* 弹窗编辑：点击姓名打开，支持每日4项下拉框修改，回传编辑态统一保存 */}
+      {modalEmployee && (
+        <EditModal
+          employee={modalEmployee}
+          year={year}
+          month={month}
+          data={data}
+          dictData={dictData}
+          editing={editing}
+          setEditing={setEditing}
+          onClose={() => setModalEmployee(null)}
+        />
+      )}
     </div>
   );
 }
+
+// ── 弹窗编辑组件：每日4项（班次/餐时/AM工种/PM工种）下拉框修改，回传编辑态 ──
+function EditModal({ employee, year, month, data, dictData, editing, setEditing, onClose }) {
+  // 弹窗直接展示个人月度排班表（已删除原"个人排班汇总统计"、"个人月度目标"标签页）
+  const days = Array.isArray(data?.days) ? data.days : Array.from({ length: data?.days || 0 }, (_, i) => i + 1);
+
+  // 当前单元格值（编辑态优先，其次原始数据）
+  const getVal = (d, field) => {
+    const orig = data?.records?.[employee.employee_id]?.[d] || {};
+    return editing[employee.employee_id]?.[d]?.[field] ?? orig[field] ?? '';
+  };
+
+  const mealOptions = dictData?.['meal_time'] || [];
+  const shiftOptions = dictData?.['shift'] || [];
+  const amOptions = dictData?.['am_work_type'] || [];
+  const pmOptions = dictData?.['pm_work_type'] || [];
+
+  const mapAmToPm = (amVal) => {
+    if (!amVal) return '';
+    return amVal.replace('AM', 'PM');
+  };
+
+  // 修改单格（含联动：班次→餐时、AM→PM 默认）
+  const updateVal = (d, field, value) => {
+    const empId = employee.employee_id;
+    const next = { ...editing };
+    if (!next[empId]) next[empId] = {};
+    if (!next[empId][d]) {
+      const orig = data.records[empId]?.[d] || {};
+      next[empId][d] = {
+        shift: orig.shift || '', meal_time: orig.meal_time || '',
+        am_work_type: orig.am_work_type || '', pm_work_type: orig.pm_work_type || '',
+        remark: orig.remark || '',
+      };
+    }
+    const cell = next[empId][d];
+    cell[field] = value;
+
+    if (field === 'shift') {
+      if (value === '晚班') cell.meal_time = '17:30餐';
+      else if (value === '全班') cell.meal_time = '11:30餐';
+      else if (value === '日班' || value === '早班') {
+        if (!['11:00餐', '11:30餐', '12:00餐'].includes(cell.meal_time)) cell.meal_time = '11:30餐';
+      }
+      if (value === '假') { cell.meal_time = '假'; cell.am_work_type = 'AM假'; cell.pm_work_type = 'PM假'; }
+      if (value === '休') { cell.meal_time = '休'; cell.am_work_type = 'AM休'; cell.pm_work_type = 'PM休'; }
+    }
+    if (field === 'am_work_type') {
+      const currentPm = cell.pm_work_type || '';
+      const expectedPm = mapAmToPm(value);
+      const prevAm = cell._prevAm || '';
+      if (!currentPm || currentPm === mapAmToPm(prevAm)) {
+        cell.pm_work_type = expectedPm;
+      }
+      cell._prevAm = value;
+    }
+
+    setEditing(next);
+  };
+
+  const weekdayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const shiftColors = {
+    '日班': '#e3f2fd', '早班': '#fff8e1', '晚班': '#f3e5f5',
+    '全班': '#e8f5e9', '休': '#f5f5f5', '假': '#ffebee',
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-box" style={{ width: '860px', maxWidth: '92vw' }} onClick={e => e.stopPropagation()}>
+        {/* 标题栏 */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '16px', color: '#1e3a5f' }}>
+            销售服务中心 {employee.name} （工号{employee.employee_id}） {year}年{month}月 排班表
+          </h2>
+          <button onClick={onClose} style={{ fontSize: '20px', color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>x</button>
+        </div>
+
+        <div>
+          <div style={{ overflow: 'auto', maxHeight: 'calc(100vh - 320px)' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ ...mTh, width: '40px' }}>日</th>
+                  <th style={{ ...mTh, width: '46px' }}>星期</th>
+                  <th style={{ ...mTh, width: '60px' }}>班次</th>
+                  <th style={{ ...mTh, width: '70px' }}>餐时</th>
+                  <th style={{ ...mTh, width: '90px' }}>AM工种</th>
+                  <th style={{ ...mTh, width: '90px' }}>PM工种</th>
+                  <th style={{ ...mTh, width: '150px' }}>备注</th>
+                  <th style={{ ...mTh, width: '60px' }}>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {days.map((d) => {
+                  const wd = weekdayNames[(data.weekdays[d - 1] || 1) - 1];
+                  const shiftVal = getVal(d, 'shift');
+                  const mealVal = getVal(d, 'meal_time');
+                  const amVal = getVal(d, 'am_work_type');
+                  const pmVal = getVal(d, 'pm_work_type');
+                  const remarkVal = getVal(d, 'remark');
+                  const isRest = data.weekdays[d - 1] > 5;
+                  const isModified = !!editing[employee.employee_id]?.[d];
+                  return (
+                    <tr key={d} style={{ borderBottom: '1px solid #f3f4f6', background: isModified ? '#fffde7' : '#fff' }}>
+                      <td style={{ ...mTd, textAlign: 'center', fontWeight: '600' }}>{d}日</td>
+                      <td style={{ ...mTd, textAlign: 'center', color: isRest ? '#dc2626' : '#6b7280' }}>{wd}</td>
+                      <td style={{ ...mTd, textAlign: 'center' }}>
+                        <select value={shiftVal} onChange={e => updateVal(d, 'shift', e.target.value)} style={selStyle}>
+                          <option value=""></option>
+                          {shiftOptions.map(o => <option key={o.id || o.value} value={o.value}>{o.value}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ ...mTd, textAlign: 'center' }}>
+                        <select value={mealVal} onChange={e => updateVal(d, 'meal_time', e.target.value)} style={selStyle}>
+                          {mealOptions.map(o => <option key={o.id || o.value} value={o.value}>{o.value}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ ...mTd, textAlign: 'center' }}>
+                        <select value={amVal} onChange={e => updateVal(d, 'am_work_type', e.target.value)} style={selStyle}>
+                          <option value=""></option>
+                          {amOptions.map(o => <option key={o.id || o.value} value={o.value}>{o.value}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ ...mTd, textAlign: 'center' }}>
+                        <select value={pmVal} onChange={e => updateVal(d, 'pm_work_type', e.target.value)} style={selStyle}>
+                          <option value=""></option>
+                          {pmOptions.map(o => <option key={o.id || o.value} value={o.value}>{o.value}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ ...mTd, padding: '2px 4px' }}>
+                        <input
+                          type="text"
+                          value={remarkVal}
+                          maxLength={50}
+                          placeholder="最多50字"
+                          onChange={e => updateVal(d, 'remark', e.target.value)}
+                          style={{ width: '100%', fontSize: '11px', border: '1px solid #ddd', borderRadius: '3px', padding: '2px 4px' }}
+                        />
+                      </td>
+                      <td style={{ ...mTd, fontSize: '10px', color: isModified ? '#d97706' : '#9ca3af', textAlign: 'center', fontWeight: isModified ? '600' : 'normal' }}>
+                        {isModified ? '已修改' : ''}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const mTh = {
+  padding: '6px 8px', textAlign: 'left', color: '#6b7280',
+  fontWeight: '600', fontSize: '12px', background: '#f9fafb',
+};
+const mTd = { padding: '4px 6px', fontSize: '12px', color: '#374151' };
+const selStyle = {
+  width: '100%', fontSize: '11px', border: '1px solid #ddd',
+  borderRadius: '3px', padding: '2px 4px', textAlign: 'center',
+};
 
 const thStyle = {
   padding: '6px 8px', textAlign: 'left', color: '#6b7280',
@@ -381,3 +666,328 @@ const tdStyle = {
   padding: '4px 6px', fontSize: '12px', color: '#374151', whiteSpace: 'nowrap',
   borderBottom: '1px solid #f3f4f6',
 };
+
+// ── 导出Excel工作簿构建（与中心排班表导出格式一致；xlsx-js-style 要求 8位ARGB，不带 #） ──
+function buildWorkbook(data, year, month) {
+  if (!data || !data.employees || data.employees.length === 0) return null;
+  const days = Array.isArray(data.days) ? data.days.length : data.days;
+  const weekdays = data.weekdays || [];
+  const wdNames = ['', '一', '二', '三', '四', '五', '六', '日'];
+
+  const rowBg = (i) => (i % 2 === 1 ? 'FFF0F7FF' : 'FFFFFFFF');
+  const headerBg = 'FFF9FAFB';
+  const shiftColors = {
+    '日班': 'FFE3F2FD', '早班': 'FFFFF8E1', '晚班': 'FFF3E5F5',
+    '全班': 'FFE8F5E9', '休': 'FFF5F5F5', '假': 'FFFFEBEE',
+  };
+  const thinBorder = {
+    top: { style: 'thin', color: { rgb: 'FFE5E7EB' } },
+    bottom: { style: 'thin', color: { rgb: 'FFE5E7EB' } },
+    left: { style: 'thin', color: { rgb: 'FFE5E7EB' } },
+    right: { style: 'thin', color: { rgb: 'FFE5E7EB' } },
+  };
+  const titleStyle = {
+    font: { bold: true, sz: 14, color: { rgb: 'FFFFFFFF' } },
+    fill: { fgColor: { rgb: 'FF1E3A5F' }, bgColor: { rgb: 'FF1E3A5F' }, patternType: 'solid' },
+    alignment: { horizontal: 'center', vertical: 'center' },
+  };
+  const headerCellStyle = {
+    font: { bold: true, sz: 10, color: { rgb: 'FF374151' } },
+    fill: { fgColor: { rgb: headerBg }, patternType: 'solid' },
+    alignment: { horizontal: 'center', vertical: 'center' },
+    border: thinBorder,
+  };
+
+  // Sheet名清理（≤31字符、去Excel非法字符、保证唯一）
+  const usedNames = new Set();
+  const safeSheetName = (base) => {
+    let name = String(base).replace(/[\\/?*[\]:]/g, '').slice(0, 31) || 'Sheet';
+    let n = name, i = 2;
+    while (usedNames.has(n)) {
+      const suffix = `(${i})`;
+      n = name.slice(0, 31 - suffix.length) + suffix;
+      i++;
+    }
+    usedNames.add(n);
+    return n;
+  };
+
+  const wb = XLSX.utils.book_new();
+
+  // ══════ Sheet 1：完整排班表（格式与中心排班表导出一致） ══════
+  const wsData = [];
+  wsData.push([`${year}年${month}月 配置排班表`]);
+  wsData.push([]);
+  const dateRow = ['姓名', '工号'];
+  for (let d = 1; d <= days; d++) dateRow.push(`${d}日`);
+  wsData.push(dateRow);
+  const weekRow = ['', ''];
+  for (let i = 0; i < days; i++) weekRow.push(`周${wdNames[weekdays[i]]}`);
+  wsData.push(weekRow);
+  data.employees.forEach((emp) => {
+    const empRecords = data.records[emp.employee_id] || {};
+    const row = [emp.name, emp.employee_id];
+    for (let d = 1; d <= days; d++) {
+      const rec = empRecords[d];
+      if (!rec) {
+        row.push('');
+      } else {
+        const am = (rec.am_work_type || '').replace('AM', '') || '';
+        const pm = (rec.pm_work_type || '').replace('PM', '') || '';
+        row.push(`${rec.shift || ''}\n${rec.meal_time || ''}\n${am}\n${pm}`);
+      }
+    }
+    wsData.push(row);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: days + 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 2, c: 0 } },
+    { s: { r: 1, c: 1 }, e: { r: 2, c: 1 } },
+  ];
+  ws['!cols'] = [{ wch: 10 }, { wch: 12 }, ...Array(days).fill({ wch: 14 })];
+  ws['A1'].s = titleStyle;
+  for (let c = 0; c <= days + 1; c++) {
+    for (let r = 2; r <= 3; r++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell) cell.s = headerCellStyle;
+    }
+  }
+  for (let r = 2; r < wsData.length; r++) {
+    const empIdx = r - 2;
+    for (let c = 0; c <= 1; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell) {
+        cell.s = {
+          font: { bold: true, sz: 10, color: { rgb: 'FF2563EB' } },
+          fill: { fgColor: { rgb: rowBg(empIdx) }, patternType: 'solid' },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border: thinBorder,
+        };
+      }
+    }
+  }
+  for (let r = 2; r < wsData.length; r++) {
+    const empIdx = r - 2;
+    for (let c = 2; c <= days + 1; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (!cell) continue;
+      const text = String(cell.v || '');
+      const shiftName = text.split('\n')[0] || '';
+      const bg = shiftColors[shiftName] || rowBg(empIdx);
+      cell.s = {
+        font: { sz: 9, color: { rgb: 'FF374151' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        border: thinBorder,
+      };
+    }
+  }
+  XLSX.utils.book_append_sheet(wb, ws, safeSheetName('配置排班表'));
+
+  // ══════ 每员工3个Sheet ══════
+  for (const emp of data.employees) {
+    const empRecords = data.records[emp.employee_id] || {};
+    const stats = (data.personStats && data.personStats[emp.employee_id]) || {};
+    const empTitle = `销售服务中心 ${emp.name}（工号${emp.employee_id}） ${year}年${month}月`;
+
+    // ── Sheet A：个人月度排班表（日历式，周一~周日） ──
+    const cal = [];
+    let cur = 1;
+    for (let week = 0; week < 6 && cur <= days; week++) {
+      const rowDays = [];
+      for (let dow = 0; dow < 7; dow++) {
+        if (cur > days) {
+          rowDays.push(null);
+        } else {
+          const wd = weekdays[cur - 1];
+          if (dow === wd - 1) {
+            rowDays.push(cur);
+            cur++;
+          } else {
+            rowDays.push(null);
+          }
+        }
+      }
+      cal.push(rowDays);
+    }
+    const calAoa = [[`${empTitle} 个人月度排班表`]];
+    calAoa.push(['周一', '周二', '周三', '周四', '周五', '周六', '周日']);
+    for (const rowDays of cal) {
+      calAoa.push(rowDays.map((day) => {
+        if (!day) return '';
+        const rec = empRecords[day];
+        if (!rec) return `${day}日`;
+        return `${day}日\n${rec.shift || ''}\n${rec.meal_time || ''}\n${rec.am_work_type || ''}\n${rec.pm_work_type || ''}`;
+      }));
+    }
+    const wsCal = XLSX.utils.aoa_to_sheet(calAoa);
+    wsCal['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 6 } }];
+    wsCal['!cols'] = Array(7).fill({ wch: 13 });
+    wsCal['!rows'] = [{ hpt: 30 }, { hpt: 20 }, ...cal.map(() => ({ hpt: 66 }))];
+    wsCal['A1'].s = titleStyle;
+    for (let c = 0; c < 7; c++) {
+      const cell = wsCal[XLSX.utils.encode_cell({ r: 1, c })];
+      if (cell) cell.s = headerCellStyle;
+    }
+    for (let r = 2; r < calAoa.length; r++) {
+      for (let c = 0; c < 7; c++) {
+        const cell = wsCal[XLSX.utils.encode_cell({ r, c })];
+        if (!cell) continue;
+        const day = cal[r - 2][c];
+        const rec = day ? empRecords[day] : null;
+        const bg = rec ? (shiftColors[rec.shift] || 'FFFFFFFF') : (day ? 'FFFFFFFF' : 'FFFAFAFA');
+        cell.s = {
+          font: { sz: 9, color: { rgb: 'FF374151' } },
+          fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+          alignment: { horizontal: 'center', vertical: 'top', wrapText: true },
+          border: thinBorder,
+        };
+      }
+    }
+    XLSX.utils.book_append_sheet(wb, wsCal, safeSheetName(`${emp.name || emp.employee_id}-排班表`));
+
+    // ── Sheet B：个人排班汇总统计（13项） ──
+    const statItems = [
+      ['实际上机天数', stats.onMachineDays], ['请假天数', stats.leaveDays],
+      ['语音天数', stats.voiceDays], ['工单留邮天数', stats.ticketDays],
+      ['IM文字天数', stats.imDays], ['质检天数', stats.qaDays],
+      ['外呼天数', stats.outboundDays], ['专项任务天数', stats.specialTaskDays],
+      ['拨测体验天数', stats.testDays], ['代值班天数', stats.dutyDays],
+      ['日班天数', stats.dayShiftDays], ['早班天数', stats.earlyShiftDays],
+      ['晚班天数', stats.lateShiftDays],
+    ];
+    const statsAoa = [
+      [`${empTitle} 个人排班汇总统计`],
+      ['统计项', '天数'],
+      ...statItems.map(([l, v]) => [l, (v === undefined || v === null) ? '' : v]),
+    ];
+    const wsStats = XLSX.utils.aoa_to_sheet(statsAoa);
+    wsStats['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+    wsStats['!cols'] = [{ wch: 20 }, { wch: 12 }];
+    wsStats['!rows'] = [{ hpt: 30 }, { hpt: 22 }, ...statItems.map(() => ({ hpt: 22 }))];
+    wsStats['A1'].s = titleStyle;
+    for (let c = 0; c <= 1; c++) {
+      const cell = wsStats[XLSX.utils.encode_cell({ r: 1, c })];
+      if (cell) cell.s = headerCellStyle;
+    }
+    for (let r = 2; r < statsAoa.length; r++) {
+      const bg = rowBg(r - 2);
+      const labCell = wsStats[XLSX.utils.encode_cell({ r, c: 0 })];
+      const valCell = wsStats[XLSX.utils.encode_cell({ r, c: 1 })];
+      if (labCell) labCell.s = {
+        font: { sz: 11, color: { rgb: 'FF374151' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        border: thinBorder,
+      };
+      if (valCell) valCell.s = {
+        font: { bold: true, sz: 11, color: { rgb: 'FF1E3A5F' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      };
+    }
+    XLSX.utils.book_append_sheet(wb, wsStats, safeSheetName(`${emp.name || emp.employee_id}-汇总统计`));
+
+    // ── Sheet C：个人月度目标 ──
+    const workload = Math.round(
+      ((stats.voiceDays || 0) + (stats.imDays || 0) + (stats.ticketDays || 0)
+        + (stats.outboundDays || 0) + (stats.qaDays || 0)) * 90
+      + (stats.testDays || 0) * 72
+    );
+    const goalsAoa = [
+      [`${empTitle} 个人月度目标`],
+      [`${month}月排班记录`],
+      ['工种', '天数'],
+      ['语音天数', stats.voiceDays ?? ''], ['工单留邮天数', stats.ticketDays ?? ''],
+      ['IM文字天数', stats.imDays ?? ''], ['外呼调研天数', stats.outboundDays ?? ''],
+      ['拨测体验天数', stats.testDays ?? ''], ['质检天数', stats.qaDays ?? ''],
+      [''],
+      [`${month}月需完成绩效考核目标`],
+      ['考核项', '目标值'],
+      ['工作量', `${workload}件`],
+      ['语音上机时间', `${(stats.voiceDays || 0) * 7.5}小时`],
+      ['IM上机时间', `${(stats.imDays || 0) * 7.5}小时`],
+      [''],
+      ['备注：语音/IM文字/外呼调研/工单留邮/质检 目标90件/天，拨测体验目标72件/天；语音/IM文字 目标7.5小时/天'],
+    ];
+    const wsGoals = XLSX.utils.aoa_to_sheet(goalsAoa);
+    const gRows = goalsAoa.length;
+    wsGoals['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
+      { s: { r: 10, c: 0 }, e: { r: 10, c: 1 } },
+      { s: { r: gRows - 1, c: 0 }, e: { r: gRows - 1, c: 1 } },
+    ];
+    wsGoals['!cols'] = [{ wch: 18 }, { wch: 14 }];
+    wsGoals['!rows'] = goalsAoa.map((_, i) => {
+      if (i === 0) return { hpt: 30 };
+      if (i === 1 || i === 10) return { hpt: 26 };
+      if (i === gRows - 1) return { hpt: 44 };
+      if (i === 9 || i === 15) return { hpt: 8 };
+      return { hpt: 22 };
+    });
+    wsGoals['A1'].s = titleStyle;
+    for (const sr of [1, 10]) {
+      const cell = wsGoals[XLSX.utils.encode_cell({ r: sr, c: 0 })];
+      if (cell) cell.s = {
+        font: { bold: true, sz: 12, color: { rgb: 'FF1E3A5F' } },
+        fill: { fgColor: { rgb: headerBg }, patternType: 'solid' },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        border: thinBorder,
+      };
+    }
+    for (const hr of [2, 11]) {
+      for (let c = 0; c <= 1; c++) {
+        const cell = wsGoals[XLSX.utils.encode_cell({ r: hr, c })];
+        if (cell) cell.s = headerCellStyle;
+      }
+    }
+    for (let r = 3; r <= 8; r++) {
+      const bg = rowBg(r - 3);
+      const labCell = wsGoals[XLSX.utils.encode_cell({ r, c: 0 })];
+      const valCell = wsGoals[XLSX.utils.encode_cell({ r, c: 1 })];
+      if (labCell) labCell.s = {
+        font: { sz: 11, color: { rgb: 'FF374151' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        border: thinBorder,
+      };
+      if (valCell) valCell.s = {
+        font: { bold: true, sz: 11, color: { rgb: 'FF1E3A5F' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      };
+    }
+    for (let r = 12; r <= 14; r++) {
+      const bg = rowBg(r - 12);
+      const labCell = wsGoals[XLSX.utils.encode_cell({ r, c: 0 })];
+      const valCell = wsGoals[XLSX.utils.encode_cell({ r, c: 1 })];
+      if (labCell) labCell.s = {
+        font: { sz: 11, color: { rgb: 'FF374151' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        border: thinBorder,
+      };
+      if (valCell) valCell.s = {
+        font: { bold: true, sz: 11, color: { rgb: 'FF2563EB' } },
+        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+        alignment: { horizontal: 'center', vertical: 'center' },
+        border: thinBorder,
+      };
+    }
+    {
+      const cell = wsGoals[XLSX.utils.encode_cell({ r: gRows - 1, c: 0 })];
+      if (cell) cell.s = {
+        font: { sz: 9, color: { rgb: 'FF9CA3AF' } },
+        alignment: { horizontal: 'left', vertical: 'top', wrapText: true },
+        border: thinBorder,
+      };
+    }
+    XLSX.utils.book_append_sheet(wb, wsGoals, safeSheetName(`${emp.name || emp.employee_id}-月度目标`));
+  }
+
+  return wb;
+}
