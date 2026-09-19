@@ -5,24 +5,24 @@ import { maskEmail, generateRandomPassword } from '../../../lib/validators';
 export default async function handler(req, res) {
   if (req.method === 'GET') {
     const { username } = req.query;
-    if (!username) return res.status(400).json({ error: '请输入用户名' });
+    if (!username) return res.status(400).json({ error: '璇疯緭鍏ョ敤鎴峰悕' });
 
     try {
       const result = await query('SELECT email FROM users WHERE username = $1', [username]);
-      if (result.rows.length === 0) return res.status(404).json({ error: '该用户名不存在' });
+      if (result.rows.length === 0) return res.status(404).json({ error: '璇ョ敤鎴峰悕涓嶅瓨鍦? });
       const user = result.rows[0];
-      if (!user.email) return res.status(400).json({ error: '该账号未设置邮箱，请联系管理员重置密码' });
+      if (!user.email) return res.status(400).json({ error: '璇ヨ处鍙锋湭璁剧疆閭锛岃鑱旂郴绠＄悊鍛橀噸缃瘑鐮? });
       res.status(200).json({ maskedEmail: maskEmail(user.email) });
     } catch (err) {
-      res.status(500).json({ error: '服务器错误' });
+      res.status(500).json({ error: '鏈嶅姟鍣ㄩ敊璇? });
     }
   } else if (req.method === 'POST') {
     const { username } = req.body;
     try {
       const result = await query('SELECT * FROM users WHERE username = $1', [username]);
-      if (result.rows.length === 0) return res.status(404).json({ error: '该用户名不存在' });
+      if (result.rows.length === 0) return res.status(404).json({ error: '璇ョ敤鎴峰悕涓嶅瓨鍦? });
       const user = result.rows[0];
-      if (!user.email) return res.status(400).json({ error: '该账号未设置邮箱，请联系管理员重置密码' });
+      if (!user.email) return res.status(400).json({ error: '璇ヨ处鍙锋湭璁剧疆閭锛岃鑱旂郴绠＄悊鍛橀噸缃瘑鐮? });
 
       const newPwd = generateRandomPassword();
       const bcrypt = require('bcryptjs');
@@ -31,19 +31,22 @@ export default async function handler(req, res) {
       await query('UPDATE users SET password = $1, force_change_password = TRUE, status = $2, login_fail_count = 0 WHERE id = $3', [hashedPwd, 'active', user.id]);
 
       const mailHtml = `
-        <h2>【微创新实验田】密码重置通知</h2>
-        <p>您的账号密码已重置，新密码如下：</p>
+        <h2>銆愬井鍒涙柊瀹為獙鐢般€戝瘑鐮侀噸缃€氱煡</h2>
+        <p>鎮ㄧ殑璐﹀彿瀵嗙爜宸查噸缃紝鏂板瘑鐮佸涓嬶細</p>
         <p style="font-size:20px;font-weight:bold;color:#2563eb;letter-spacing:2px;">${newPwd}</p>
-        <p>请使用此密码登录，登录后系统将要求您修改密码。</p>
-        <p>如非本人操作，请联系管理员。</p>
+        <p>璇蜂娇鐢ㄦ瀵嗙爜鐧诲綍锛岀櫥褰曞悗绯荤粺灏嗚姹傛偍淇敼瀵嗙爜銆?/p>
+        <p>濡傞潪鏈汉鎿嶄綔锛岃鑱旂郴绠＄悊鍛樸€?/p>
       `;
-      await sendMail(user.email, '【微创新实验田】您的密码已重置', mailHtml);
+      const mailResult = await sendMail(user.email, '銆愬井鍒涙柊瀹為獙鐢般€戞偍鐨勫瘑鐮佸凡閲嶇疆', mailHtml);
+      if (mailResult === false) {
+        return res.status(500).json({ error: '瀵嗙爜宸查噸缃紝浣嗛偖浠跺彂閫佸け璐ワ細' + (sendMail.lastError || '鏈煡閿欒') });
+      }
 
-      res.status(200).json({ message: '新密码已发送到您的邮箱，请查收' });
+      res.status(200).json({ message: '鏂板瘑鐮佸凡鍙戦€佸埌鎮ㄧ殑閭锛岃鏌ユ敹' });
     } catch (err) {
-      res.status(500).json({ error: '服务器错误' });
+      res.status(500).json({ error: '鏈嶅姟鍣ㄩ敊璇? });
     }
   } else {
-    res.status(405).json({ error: '方法不允许' });
+    res.status(405).json({ error: '鏂规硶涓嶅厑璁? });
   }
 }
