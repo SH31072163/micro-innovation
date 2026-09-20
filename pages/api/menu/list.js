@@ -35,9 +35,15 @@ export default async function handler(req, res) {
         visible = isAdmin;
         if (isAdmin) children.forEach(c => { c.is_permitted = true; });
       } else if (m2.title === '排班表') {
-        // 排班表：超管和排班管理员可见
-        visible = isScheduleAdmin;
-        if (visible) children.forEach(c => { c.is_permitted = true; });
+        // 排班表：超管和排班管理员可见全部；普通用户需有子菜单授权才可见
+        if (isScheduleAdmin) {
+          visible = true;
+          children.forEach(c => { c.is_permitted = true; });
+        } else if (permittedIds.has(m2.id)) {
+          visible = true;
+        } else if (children.some(c => c.is_permitted)) {
+          visible = true;
+        }
       } else {
         // 其他菜单：超管可见全部；其他用户需有授权才可见
         if (isAdmin) {
