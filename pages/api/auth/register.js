@@ -75,7 +75,7 @@ export default async function handler(req, res) {
 
     await query('INSERT INTO email_tokens (user_id, token, type, expires_at) VALUES ($1, $2, $3, $4)', [userId, token, 'register', expiresAt]);
 
-    const verifyUrl = `${req.headers.origin || 'https://micro-innovation.pages.dev'}/api/auth/verify?token=${token}`;
+    const verifyUrl = `${req.headers.origin || 'https://micro-innovation.pages.dev'}/verify?token=${token}`;
     const mailHtml = `
       <h2>欢迎注册「销售服务中心微创新实验田」</h2>
       <p>请在24小时内点击以下链接完成邮箱验证：</p>
