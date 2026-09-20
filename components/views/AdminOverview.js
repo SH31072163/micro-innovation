@@ -134,15 +134,15 @@ export default function AdminOverview({ token, user }) {
       </div>
 
       {/* 搜索框+搜索按钮在左，导出在右（位于用户概览与用户列表之间） */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input className="input-field" style={{ maxWidth: '360px', fontSize: '13px', padding: '6px 12px', height: '32px', boxSizing: 'border-box' }}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          <input className="input-field" style={{ width: '300px', maxWidth: '360px', fontSize: '13px', padding: '6px 12px', height: '32px', boxSizing: 'border-box', flexShrink: 1 }}
             placeholder="按用户名/邮箱/姓名/部门/劳动关系搜索..."
             value={keyword}
             onChange={e => setKeyword(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }} />
           <button className="btn-primary" onClick={handleSearch}
-            style={{ padding: '6px 16px', fontSize: '13px', height: '32px', boxSizing: 'border-box', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', lineHeight: '20px' }}>
+            style={{ padding: '6px 16px', fontSize: '13px', height: '32px', boxSizing: 'border-box', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', width: 'auto', flexShrink: 0 }}>
             搜索
           </button>
         </div>
