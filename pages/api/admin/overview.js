@@ -64,36 +64,34 @@ export default async function handler(req, res) {
     // ── GET: 获取统计 + 用户列表 ──
     if (req.method !== 'GET') return res.status(405).json({ error: '方法不允许' });
 
-    const total = await query("SELECT COUNT(*) as count FROM users WHERE is_admin = FALSE");
+    const total = await query("SELECT COUNT(*) as count FROM users");
     // 正常账号 = 状态 active 且邮箱已验证
-    const active = await query("SELECT COUNT(*) as count FROM users WHERE status = 'active' AND email_verified = TRUE AND is_admin = FALSE");
-    // 未验证邮箱 = 非冻结 且 未验证邮箱（无论 active 或 其他状态）
-    const unverified = await query("SELECT COUNT(*) as count FROM users WHERE email_verified = FALSE AND status != 'frozen' AND is_admin = FALSE");
+    const active = await query("SELECT COUNT(*) as count FROM users WHERE status = 'active' AND email_verified = TRUE");
+    // 未验证邮箱 = 非冻结 且 未验证邮箱
+    const unverified = await query("SELECT COUNT(*) as count FROM users WHERE email_verified = FALSE AND status != 'frozen'");
     // 冻结账号 = 状态 frozen
-    const frozen = await query("SELECT COUNT(*) as count FROM users WHERE status = 'frozen' AND is_admin = FALSE");
+    const frozen = await query("SELECT COUNT(*) as count FROM users WHERE status = 'frozen'");
 
     // 获取管理区菜单 ID
     const menuResult = await query("SELECT id FROM menus WHERE title = '管理区'");
     const adminAreaMenuId = menuResult.rows[0]?.id;
 
-    // 全量用户列表（含授权状态）
+    // 全量用户列表（含授权状态，包含超级管理员）
     let usersList = [];
     if (adminAreaMenuId) {
       usersList = await query(`
-        SELECT u.id, u.username, u.real_name, u.department, u.labor_relation,
-               u.register_date, u.status, u.email_verified,
+        SELECT u.id, u.username, u.real_name, u.email, u.department, u.labor_relation,
+               u.register_date, u.status, u.email_verified, u.is_admin, u.user_id,
                CASE WHEN mp.id IS NOT NULL THEN TRUE ELSE FALSE END as admin_area_authorized
         FROM users u
         LEFT JOIN menu_permissions mp ON mp.user_id = u.id AND mp.menu_id = $1
-        WHERE u.is_admin = FALSE
         ORDER BY u.id ASC
       `, [adminAreaMenuId]);
     } else {
       usersList = await query(`
-        SELECT id, username, real_name, department, labor_relation, register_date, status, email_verified,
-               FALSE as admin_area_authorized
+        SELECT id, username, real_name, email, department, labor_relation, register_date, status, email_verified,
+               is_admin, user_id, FALSE as admin_area_authorized
         FROM users
-        WHERE is_admin = FALSE
         ORDER BY id ASC
       `);
     }
@@ -110,7 +108,10 @@ export default async function handler(req, res) {
         labor_relation: u.labor_relation,
         register_date: u.register_date,
       })),
-      users: usersList.rows,
+      users: usersList.rows.map(u => ({
+        ...u,
+        status_text: u.status === 'frozen' ? '冻结' : (u.email_verified ? '正常' : '待邮箱验证'),
+      })),
     });
   } catch (err) {
     console.error('Overview error:', err);
