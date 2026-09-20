@@ -60,6 +60,7 @@ export default function PersonalProfile({ token, user }) {
       <div style={{ background: '#fff', borderRadius: '8px', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 40px' }}>
           <FieldRow label="用户名" value={profile?.username} />
+          <FieldRow label="用户编号" value={profile?.user_id} />
           <FieldRow label="姓名" value={profile?.real_name} editable onEdit={() => { setEditing(true); setEditField('real_name'); setEditValue(profile?.real_name || ''); }} />
           <FieldRow label="关联邮箱" value={profile?.email} editable onEdit={() => { setEditing(true); setEditField('email'); setEditValue(profile?.email || ''); }} />
           <FieldRow label="手机号码" value={profile?.phone} editable onEdit={() => { setEditing(true); setEditField('phone'); setEditValue(profile?.phone || ''); }} />
