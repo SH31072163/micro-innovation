@@ -11,6 +11,7 @@ export default function AdminUsers({ token, user }) {
   const [resendingId, setResendingId] = useState(null); // 正在重发邮件的用户id
   const [barMsg, setBarMsg] = useState(''); // 列表页顶部提示条
   const [barMsgType, setBarMsgType] = useState(''); // 'success' | 'error'
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); // 删除确认弹窗
 
   const searchUsers = async (kw) => {
     setLoading(true);
@@ -77,16 +78,19 @@ export default function AdminUsers({ token, user }) {
       if (res.ok) {
         setBarMsg(data.message);
         setBarMsgType('success');
+        alert(data.message);
         searchUsers(keyword);
         if (selectedUser && selectedUser.id === u.id) setMsg(data.message);
       } else {
         setBarMsg(data.error || '重发失败');
         setBarMsgType('error');
+        alert(data.error || '重发失败');
         if (selectedUser && selectedUser.id === u.id) setMsg(data.error || '重发失败');
       }
     } catch (err) {
       setBarMsg('网络错误，重发失败');
       setBarMsgType('error');
+      alert('网络错误，重发失败');
     } finally {
       setResendingId(null);
     }
@@ -121,9 +125,6 @@ export default function AdminUsers({ token, user }) {
   };
 
   const handleDeleteUser = async () => {
-    if (!window.confirm(`确定要删除账号「${selectedUser.username}」吗？\n删除后该用户的所有数据（会话、记录等）将一并清除，且不可恢复！`)) {
-      return;
-    }
     try {
       const res = await fetch('/api/admin/users', {
         method: 'DELETE',
@@ -136,13 +137,16 @@ export default function AdminUsers({ token, user }) {
       const data = await res.json();
       if (res.ok) {
         setSelectedUser(null);
+        setShowDeleteConfirm(false);
         setMsg('');
         searchUsers(keyword);
       } else {
         setMsg(data.error || '删除失败');
+        setShowDeleteConfirm(false);
       }
     } catch (err) {
       setMsg('网络错误');
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -181,6 +185,7 @@ export default function AdminUsers({ token, user }) {
             <thead>
               <tr style={{ background: '#f9fafb', borderBottom: '2px solid #e5e7eb' }}>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>序号</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>用户编号</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>用户名</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>姓名</th>
                 <th style={{ padding: '10px 16px', textAlign: 'left', color: '#6b7280' }}>手机号码</th>
@@ -197,6 +202,7 @@ export default function AdminUsers({ token, user }) {
                   onMouseEnter={e => e.currentTarget.style.background = '#f0f4ff'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                   <td style={{ padding: '10px 16px', color: '#9ca3af' }}>{u.index}</td>
+                  <td style={{ padding: '10px 16px', color: '#374151' }}>{u.user_id || '-'}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{u.username}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{u.real_name}</td>
                   <td style={{ padding: '10px 16px', color: '#374151' }}>{u.phone || '-'}</td>
@@ -243,8 +249,12 @@ export default function AdminUsers({ token, user }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {/* 用户名 */}
               <DetailRow label="用户名" value={selectedUser.username}>
-                <button className={selectedUser.status === 'frozen' ? 'btn-success' : 'btn-danger'}
-                  onClick={handleFreezeToggle}>{selectedUser.status === 'frozen' ? '解冻' : '冻结'}</button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className={selectedUser.status === 'frozen' ? 'btn-success' : 'btn-danger'}
+                    onClick={handleFreezeToggle}>{selectedUser.status === 'frozen' ? '解冻' : '冻结'}</button>
+                  <button className="btn-danger" style={{ padding: '2px 10px', fontSize: '12px' }}
+                    onClick={() => setShowDeleteConfirm(true)}>删除</button>
+                </div>
               </DetailRow>
 
               {/* 密码 */}
@@ -378,10 +388,25 @@ export default function AdminUsers({ token, user }) {
                 )}
               </DetailRow>
 
-              {/* 删除账号 */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px' }}>
-                <button className="btn-danger" style={{ padding: '8px 20px', fontSize: '14px' }}
-                  onClick={handleDeleteUser}>删除账号</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除确认弹窗 */}
+      {showDeleteConfirm && selectedUser && (
+        <div className="modal-overlay" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="modal-box" style={{ width: '380px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ textAlign: 'center', paddingTop: '8px' }}>
+              <div style={{ fontSize: '40px', color: '#dc2626', marginBottom: '12px' }}>&#9888;</div>
+              <p style={{ fontSize: '16px', color: '#374151', marginBottom: '24px' }}>
+                确定要删除账号「{selectedUser.username}」吗？<br/>删除后不可恢复！
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                <button className="btn-danger" style={{ padding: '8px 24px', fontSize: '14px' }}
+                  onClick={handleDeleteUser}>确认删除</button>
+                <button className="btn-secondary" style={{ padding: '8px 24px', fontSize: '14px' }}
+                  onClick={() => setShowDeleteConfirm(false)}>取消</button>
               </div>
             </div>
           </div>
