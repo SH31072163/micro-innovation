@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     }
 
     if (!user.email_verified) {
-      return res.status(403).json({ error: '邮箱未验证，请查收注册邮件并点击验证链接' });
+      return res.status(403).json({ error: '邮箱未验证，请到邮箱打开验证邮件，点击页面中的"确认验证"按钮完成验证' });
     }
 
     const bcrypt = require('bcryptjs');
