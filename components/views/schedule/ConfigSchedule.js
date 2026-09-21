@@ -248,19 +248,19 @@ export default function ConfigSchedule({ token }) {
 
   // ── 汇总统计字段定义（与个人弹窗13项一致，短标签用于表头/列） ──
   const SUM_ITEMS = [
-    { key: 'onMachineDays', label: '实际上机' },
-    { key: 'leaveDays', label: '请假' },
-    { key: 'voiceDays', label: '语音' },
-    { key: 'ticketDays', label: '工单留邮' },
-    { key: 'imDays', label: 'IM文字' },
-    { key: 'qaDays', label: '质检' },
-    { key: 'outboundDays', label: '外呼' },
-    { key: 'specialTaskDays', label: '专项' },
-    { key: 'testDays', label: '拨测' },
-    { key: 'dutyDays', label: '代班' },
-    { key: 'dayShiftDays', label: '日班' },
-    { key: 'earlyShiftDays', label: '早班' },
-    { key: 'lateShiftDays', label: '晚班' },
+    { key: 'onMachineDays', label: '实际上机', labelFull: '实际上机人数' },
+    { key: 'leaveDays', label: '请假', labelFull: '请假人数' },
+    { key: 'voiceDays', label: '语音', labelFull: '语音人数' },
+    { key: 'ticketDays', label: '工单留邮', labelFull: '工单留邮人数' },
+    { key: 'imDays', label: 'IM文字', labelFull: 'IM文字人数' },
+    { key: 'qaDays', label: '质检', labelFull: '质检人数' },
+    { key: 'outboundDays', label: '外呼', labelFull: '外呼人数' },
+    { key: 'specialTaskDays', label: '专项', labelFull: '专项人数' },
+    { key: 'testDays', label: '拨测', labelFull: '拨测人数' },
+    { key: 'dutyDays', label: '代班', labelFull: '代班人数' },
+    { key: 'dayShiftDays', label: '日班', labelFull: '日班人数' },
+    { key: 'earlyShiftDays', label: '早班', labelFull: '早班人数' },
+    { key: 'lateShiftDays', label: '晚班', labelFull: '晚班人数' },
   ];
 
   // 格式化统计值（去掉多余的 .0，保留 .5）
@@ -446,19 +446,14 @@ export default function ConfigSchedule({ token }) {
               })}
               {/* 天维度13项汇总行（最后一个员工下方） */}
               {data.dayStats && (
+                <>
                 <tr style={{ background: '#eef2ff' }}>
                   <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '60px', minWidth: '60px', maxWidth: '60px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}>合计</td>
                   <td style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: '60px', zIndex: 10, width: '70px', minWidth: '70px', maxWidth: '70px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}></td>
-                  {data.days.map((_, dayIdx) => {
-                    const day = dayIdx + 1;
-                    const ds = data.dayStats?.[day] || {};
-                    // 每天显示该日在岗人数（实际出勤=onMachineDays，休息/请假不展示具体工种）
-                    return (
-                      <td key={`dsum${dayIdx}`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: '#eef2ff', fontWeight: '600', color: '#3730a3' }}>
-                        {fmtSum(ds.onMachineDays)}
-                      </td>
-                    );
-                  })}
+                  {data.days.map((_, dayIdx) => (
+                    <td key={`dsum${dayIdx}`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', background: '#eef2ff' }}>
+                    </td>
+                  ))}
                   {/* 天维度13项汇总值（合计列对应SUM_ITEMS） */}
                   {SUM_ITEMS.map((item, i) => {
                     let total = 0;
@@ -472,6 +467,41 @@ export default function ConfigSchedule({ token }) {
                     );
                   })}
                 </tr>
+                {/* 合计行下方新增13行：每行一个统计指标，每天显示当天人数 */}
+                {SUM_ITEMS.map((item, rowIdx) => (
+                  <tr key={`statRow${rowIdx}`} style={{ background: rowIdx % 2 === 0 ? '#f5f3ff' : '#ede9fe' }}>
+                    <td colSpan={2} style={{ ...tdStyle, boxSizing: 'border-box', position: 'sticky', left: 0, zIndex: 10, width: '130px', minWidth: '130px', background: rowIdx % 2 === 0 ? '#f5f3ff' : '#ede9fe', fontWeight: '600', color: '#3730a3', paddingLeft: '8px' }}>
+                      {item.labelFull || item.label}
+                    </td>
+                    {data.days.map((_, dayIdx) => {
+                      const day = dayIdx + 1;
+                      const ds = data.dayStats?.[day] || {};
+                      return (
+                        <td key={`s${rowIdx}d${dayIdx}`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '65px', fontWeight: '500', color: '#4338ca' }}>
+                          {fmtSum(ds[item.key])}
+                        </td>
+                      );
+                    })}
+                    {/* 右侧月度合计（该项指标的月度合计，占第1列；其余12列留空） */}
+                    {(() => {
+                      let total = 0;
+                      for (let d = 1; d <= data.days.length; d++) {
+                        total += (data.dayStats?.[d]?.[item.key] || 0);
+                      }
+                      return (
+                        <>
+                          <td key={`s${rowIdx}total`} style={{ ...tdStyle, padding: '1px', textAlign: 'center', minWidth: '52px', background: '#e0e7ff', fontWeight: '700', color: '#3730a3' }}>
+                            {fmtSum(total)}
+                          </td>
+                          {SUM_ITEMS.slice(1).map((_, j) => (
+                            <td key={`s${rowIdx}pad${j}`} style={{ ...tdStyle, minWidth: '52px', background: rowIdx % 2 === 0 ? '#f5f3ff' : '#ede9fe' }}></td>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </tr>
+                ))}
+                </>
               )}
             </tbody>
           </table>
