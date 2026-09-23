@@ -4,8 +4,8 @@ import { getUserFromRequest } from '../../../lib/auth';
 /**
  * 排班表管理区 - 人员增删 API
  * GET    /api/schedule/employees     获取所有人员
- * POST   /api/schedule/employees     新增人员  { name, employee_id, email }
- * PUT    /api/schedule/employees     修改人员  { id, email }  (姓名和工号不可改)
+ * POST   /api/schedule/employees     新增人员  { name, employee_id, email, employee_type }
+ * PUT    /api/schedule/employees     修改人员  { id, email, employee_type }  (姓名和工号不可改)
  * DELETE /api/schedule/employees    删除人员  { id }
  *
  * 注意：增删效果在"配置排班"和"配置默认规则"中只能次月生效。
@@ -25,33 +25,60 @@ export default async function handler(req, res) {
     // ── GET ──
     if (req.method === 'GET') {
       const result = await query(
-        'SELECT id, name, employee_id, email, is_active, created_at FROM schedule_employees ORDER BY employee_id ASC'
+        'SELECT id, name, employee_id, email, employee_type, hire_date, is_active, created_at FROM schedule_employees ORDER BY employee_id ASC'
       );
       return res.status(200).json(result.rows);
     }
 
     // ── POST: 新增 ──
     if (req.method === 'POST') {
-      const { name, employee_id, email } = req.body;
+      const { name, employee_id, email, employee_type, hire_date } = req.body;
       if (!name || !employee_id) return res.status(400).json({ error: '姓名和工号必填' });
+      if (!hire_date || !/^\d{6}$/.test(hire_date)) return res.status(400).json({ error: '入职日期必填，格式YYYYMM' });
+
+      // 兼职全职校验：只允许两个枚举值，缺省为全职
+      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗'];
+      const type = employee_type || '全职用户接待岗';
+      if (!EMPLOYEE_TYPES.includes(type)) {
+        return res.status(400).json({ error: '兼职全职取值无效' });
+      }
 
       // 检查工号唯一
       const existing = await query('SELECT id FROM schedule_employees WHERE employee_id = $1', [employee_id]);
       if (existing.rows.length > 0) return res.status(409).json({ error: '工号已存在' });
 
       await query(
-        'INSERT INTO schedule_employees (name, employee_id, email, is_active) VALUES ($1, $2, $3, TRUE)',
-        [name, employee_id, (email || '').trim()]
+        'INSERT INTO schedule_employees (name, employee_id, email, employee_type, hire_date, is_active) VALUES ($1, $2, $3, $4, $5, TRUE)',
+        [name, employee_id, (email || '').trim(), type, hire_date]
       );
       return res.status(201).json({ message: '新增成功' });
     }
 
-    // ── PUT: 修改（仅可改邮箱，姓名和工号不可改） ──
+    // ── PUT: 修改（可改邮箱、兼职全职类型，姓名和工号不可改） ──
     if (req.method === 'PUT') {
-      const { id, email } = req.body;
+      const { id, email, employee_type, hire_date } = req.body;
       if (!id) return res.status(400).json({ error: '缺少ID' });
 
-      await query('UPDATE schedule_employees SET email = $1 WHERE id = $2', [(email || '').trim(), id]);
+      // 兼职全职校验（若传了值才校验）
+      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗'];
+      if (employee_type !== undefined && employee_type !== null && !EMPLOYEE_TYPES.includes(employee_type)) {
+        return res.status(400).json({ error: '兼职全职取值无效' });
+      }
+
+      // 入职日期校验（若传了值才校验）
+      if (hire_date !== undefined && hire_date !== null && !/^\d{6}$/.test(hire_date)) {
+        return res.status(400).json({ error: '入职日期格式无效，应为YYYYMM' });
+      }
+
+      // 仅更新传了的字段，避免覆盖
+      const fields = [];
+      const params = [];
+      if (email !== undefined) { params.push((email || '').trim()); fields.push('email = $' + params.length); }
+      if (employee_type !== undefined && employee_type !== null) { params.push(employee_type); fields.push('employee_type = $' + params.length); }
+      if (hire_date !== undefined && hire_date !== null) { params.push(hire_date); fields.push('hire_date = $' + params.length); }
+      if (fields.length === 0) return res.status(400).json({ error: '没有可更新的字段' });
+      params.push(id);
+      await query('UPDATE schedule_employees SET ' + fields.join(', ') + ' WHERE id = $' + params.length, params);
       return res.status(200).json({ message: '修改成功' });
     }
 
@@ -60,7 +87,7 @@ export default async function handler(req, res) {
       const { id } = req.body;
       if (!id) return res.status(400).json({ error: '缺少ID' });
 
-      await query('UPDATE schedule_employees SET is_active = FALSE WHERE id = $1', [id]);
+      await query('UPDATE schedule_employees SET is_active = FALSE, deactivated_at = NOW() WHERE id = $1', [id]);
       return res.status(200).json({ message: '删除成功（次月生效）' });
     }
 
