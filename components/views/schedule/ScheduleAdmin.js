@@ -2,21 +2,20 @@ import { useState, useEffect } from 'react';
 import ConfigSchedule from './ConfigSchedule';
 import ConfigDict from './ConfigDict';
 import ConfigConversion from './ConfigConversion';
-import ConfigEmployees from './ConfigEmployees';
 import ConfigEmail from './ConfigEmail';
 import ConfigRules from './ConfigRules';
-import ConfigHolidays from './ConfigHolidays';
 import SyncHRConfig from './SyncHRConfig';
 
 /**
- * 排班表管理区 - 8个配置页面
- * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 人员增删 | 邮件提醒 | 自排规则 | 假日配置 | 同步人力
+ * 排班表管理区 - 6个配置页面
+ * 顶部标签切换：配置排班 | 数据字典 | 换算规则 | 邮件提醒 | 自排规则 | 同步人力
+ * （「人员增删」「假日配置」已转移至系统管理/部门管理）
  */
 export default function ScheduleAdmin({ token, onTabChange }) {
   const [tab, setTab] = useState(0);
 
   const tabs = [
-    '配置排班', '数据字典', '换算规则', '人员增删', '邮件提醒', '自排规则', '假日配置', '同步人力',
+    '配置排班', '数据字典', '换算规则', '邮件提醒', '自排规则', '同步人力',
   ];
 
   const handleTabChange = (i) => {
@@ -57,11 +56,9 @@ export default function ScheduleAdmin({ token, onTabChange }) {
         {tab === 0 && <ConfigSchedule token={token} />}
         {tab === 1 && <ConfigDict token={token} />}
         {tab === 2 && <ConfigConversion token={token} />}
-        {tab === 3 && <ConfigEmployees token={token} />}
-        {tab === 4 && <ConfigEmail token={token} />}
-        {tab === 5 && <ConfigRules token={token} />}
-        {tab === 6 && <ConfigHolidays token={token} />}
-        {tab === 7 && <SyncHRConfig token={token} />}
+        {tab === 3 && <ConfigEmail token={token} />}
+        {tab === 4 && <ConfigRules token={token} />}
+        {tab === 5 && <SyncHRConfig token={token} />}
       </div>
     </div>
   );
