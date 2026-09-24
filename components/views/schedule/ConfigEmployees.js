@@ -12,7 +12,22 @@ export default function ConfigEmployees({ token }) {
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState('');
   const [emailDraft, setEmailDraft] = useState({}); // id -> email
-  const [newEmp, setNewEmp] = useState({ name: '', employee_id: '', email: '' });
+  const [typeDraft, setTypeDraft] = useState({}); // id -> employee_type
+  const [hireDateDraft, setHireDateDraft] = useState({}); // id -> { year, month }
+  const [newEmp, setNewEmp] = useState({ name: '', employee_id: '', email: '', employee_type: '全职用户接待岗', hire_year: '2024', hire_month: '6' });
+
+  const YEARS = ['2024', '2025', '2026', '2027', '2028', '2029', '2030'];
+  const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+
+  // hire_date 'YYYYMM' -> { year, month }
+  function parseHireDate(hd) {
+    if (!hd || hd.length !== 6) return { year: '2024', month: '6' };
+    return { year: hd.substring(0, 4), month: String(parseInt(hd.substring(4, 6))) };
+  }
+  // { year, month } -> 'YYYYMM'
+  function formatHireDate(year, month) {
+    return year + String(month).padStart(2, '0');
+  }
 
   useEffect(() => { fetchData(); }, []);
 
@@ -27,6 +42,8 @@ export default function ConfigEmployees({ token }) {
         const d = await res.json();
         setData(d);
         setEmailDraft({});
+        setTypeDraft({});
+        setHireDateDraft({});
       }
     } catch (err) {
       console.error('获取人员失败:', err);
@@ -41,22 +58,41 @@ export default function ConfigEmployees({ token }) {
     try {
       let hasError = false;
 
-      // 更新邮箱
-      for (const [id, email] of Object.entries(emailDraft)) {
+      // 更新邮箱/兼职全职/入职日期
+      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗'];
+      const changedIds = new Set([
+        ...Object.keys(emailDraft).map(Number),
+        ...Object.keys(typeDraft).map(Number),
+        ...Object.keys(hireDateDraft).map(Number),
+      ]);
+      for (const id of changedIds) {
+        const emp = data.find(e => e.id === id);
+        if (!emp) continue;
+        const email = emailDraft[id] ?? emp.email ?? '';
+        const type = typeDraft[id] ?? emp.employee_type ?? EMPLOYEE_TYPES[0];
+        const hd = hireDateDraft[id] ?? parseHireDate(emp.hire_date);
+        const hire_date = formatHireDate(hd.year, hd.month);
         const res = await fetch('/api/schedule/employees', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ id: parseInt(id), email }),
+          body: JSON.stringify({ id, email, employee_type: type, hire_date }),
         });
         if (!res.ok) hasError = true;
       }
 
       // 新增
       if (newEmp.name && newEmp.employee_id) {
+        const hire_date = formatHireDate(newEmp.hire_year, newEmp.hire_month);
         const res = await fetch('/api/schedule/employees', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(newEmp),
+          body: JSON.stringify({
+            name: newEmp.name,
+            employee_id: newEmp.employee_id,
+            email: newEmp.email,
+            employee_type: newEmp.employee_type,
+            hire_date,
+          }),
         });
         if (!res.ok) {
           const err = await res.json();
@@ -69,12 +105,14 @@ export default function ConfigEmployees({ token }) {
       if (!hasError) {
         setMsg('保存成功');
         setMsgType('success');
+        alert('保存成功');
         fetchData();
-        setNewEmp({ name: '', employee_id: '', email: '' });
+        setNewEmp({ name: '', employee_id: '', email: '', employee_type: '全职用户接待岗', hire_year: '2024', hire_month: '6' });
       }
     } catch (err) {
       setMsg('网络错误');
       setMsgType('error');
+      alert('保存失败：网络错误');
     } finally {
       setLoading(false);
     }
@@ -93,15 +131,19 @@ export default function ConfigEmployees({ token }) {
       if (res.ok) {
         setMsg('删除成功（次月生效）');
         setMsgType('success');
+        alert('删除成功（次月生效）');
         fetchData();
       } else {
         const err = await res.json();
-        setMsg(err.error || '删除失败');
+        const tip = err.error || '删除失败';
+        setMsg(tip);
         setMsgType('error');
+        alert(tip);
       }
     } catch (err) {
       setMsg('网络错误');
       setMsgType('error');
+      alert('删除失败：网络错误');
     } finally {
       setLoading(false);
     }
@@ -109,7 +151,9 @@ export default function ConfigEmployees({ token }) {
 
   const handleCancel = () => {
     setEmailDraft({});
-    setNewEmp({ name: '', employee_id: '', email: '' });
+    setTypeDraft({});
+    setHireDateDraft({});
+    setNewEmp({ name: '', employee_id: '', email: '', employee_type: '全职用户接待岗', hire_year: '2024', hire_month: '6' });
     setMsg('');
   };
 
@@ -132,6 +176,8 @@ export default function ConfigEmployees({ token }) {
             <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
               <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>姓名</th>
               <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>工号</th>
+              <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>兼职全职</th>
+              <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>入职日期</th>
               <th style={{ padding: '8px 16px', textAlign: 'left', color: '#6b7280' }}>邮箱</th>
               <th style={{ padding: '8px 16px', textAlign: 'center', color: '#6b7280' }}>操作</th>
             </tr>
@@ -141,6 +187,34 @@ export default function ConfigEmployees({ token }) {
               <tr key={emp.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                 <td style={{ padding: '8px 16px', color: '#374151' }}>{emp.name}</td>
                 <td style={{ padding: '8px 16px', color: '#6b7280' }}>{emp.employee_id}</td>
+                <td style={{ padding: '4px 16px' }}>
+                  <select value={typeDraft[emp.id] ?? emp.employee_type ?? '全职用户接待岗'}
+                    onChange={e => setTypeDraft({ ...typeDraft, [emp.id]: e.target.value })}
+                    style={{ fontSize: '12px', border: '1px solid #ddd', borderRadius: '4px', padding: '4px 8px' }}>
+                    <option value="全职用户接待岗">全职用户接待岗</option>
+                    <option value="兼职用户接待岗">兼职用户接待岗</option>
+                    <option value="业务支撑岗">业务支撑岗</option>
+                  </select>
+                </td>
+                <td style={{ padding: '4px 16px' }}>
+                  {(() => {
+                    const hd = hireDateDraft[emp.id] ?? parseHireDate(emp.hire_date);
+                    return (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <select value={hd.year}
+                          onChange={e => setHireDateDraft({ ...hireDateDraft, [emp.id]: { ...hd, year: e.target.value } })}
+                          style={{ fontSize: '12px', border: '1px solid #ddd', borderRadius: '4px', padding: '4px 6px' }}>
+                          {YEARS.map(y => <option key={y} value={y}>{y + '年'}</option>)}
+                        </select>
+                        <select value={hd.month}
+                          onChange={e => setHireDateDraft({ ...hireDateDraft, [emp.id]: { ...hd, month: e.target.value } })}
+                          style={{ fontSize: '12px', border: '1px solid #ddd', borderRadius: '4px', padding: '4px 6px' }}>
+                          {MONTHS.map(m => <option key={m} value={m}>{m + '月'}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
+                </td>
                 <td style={{ padding: '4px 16px' }}>
                   <input type="text" value={emailDraft[emp.id] ?? emp.email ?? ''}
                     onChange={e => setEmailDraft({ ...emailDraft, [emp.id]: e.target.value })}
@@ -166,6 +240,25 @@ export default function ConfigEmployees({ token }) {
           <input type="text" placeholder="工号" value={newEmp.employee_id}
             onChange={e => setNewEmp({ ...newEmp, employee_id: e.target.value })}
             style={{ flex: 1, fontSize: '13px', border: '1px solid #ddd', borderRadius: '4px', padding: '6px 12px' }} />
+          <select value={newEmp.employee_type}
+            onChange={e => setNewEmp({ ...newEmp, employee_type: e.target.value })}
+            style={{ flex: 1.2, fontSize: '13px', border: '1px solid #ddd', borderRadius: '4px', padding: '6px 12px' }}>
+            <option value="全职用户接待岗">全职用户接待岗</option>
+            <option value="兼职用户接待岗">兼职用户接待岗</option>
+            <option value="业务支撑岗">业务支撑岗</option>
+          </select>
+          <div style={{ flex: 1.5, display: 'flex', gap: '4px' }}>
+            <select value={newEmp.hire_year}
+              onChange={e => setNewEmp({ ...newEmp, hire_year: e.target.value })}
+              style={{ flex: 1, fontSize: '13px', border: '1px solid #ddd', borderRadius: '4px', padding: '6px 8px' }}>
+              {YEARS.map(y => <option key={y} value={y}>{y + '年'}</option>)}
+            </select>
+            <select value={newEmp.hire_month}
+              onChange={e => setNewEmp({ ...newEmp, hire_month: e.target.value })}
+              style={{ flex: 1, fontSize: '13px', border: '1px solid #ddd', borderRadius: '4px', padding: '6px 8px' }}>
+              {MONTHS.map(m => <option key={m} value={m}>{m + '月'}</option>)}
+            </select>
+          </div>
           <input type="text" placeholder="邮箱" value={newEmp.email}
             onChange={e => setNewEmp({ ...newEmp, email: e.target.value })}
             style={{ flex: 2, fontSize: '13px', border: '1px solid #ddd', borderRadius: '4px', padding: '6px 12px' }} />
