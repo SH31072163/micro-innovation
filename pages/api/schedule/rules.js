@@ -40,6 +40,7 @@ export default async function handler(req, res) {
          FROM schedule_default_rules r
          JOIN schedule_employees e ON e.employee_id = r.employee_id
          WHERE r.year = $1 AND r.month = $2
+           AND e.employee_type IN ('全职用户接待岗', '兼职用户接待岗')
          ORDER BY e.employee_id ASC`,
         [year, month]
       );
