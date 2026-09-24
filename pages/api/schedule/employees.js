@@ -2,11 +2,11 @@ import { query } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
 
 /**
- * 排班表管理区 - 人员增删 API
- * GET    /api/schedule/employees     获取所有人员
- * POST   /api/schedule/employees     新增人员  { name, employee_id, email, employee_type }
- * PUT    /api/schedule/employees     修改人员  { id, email, employee_type }  (姓名和工号不可改)
- * DELETE /api/schedule/employees    删除人员  { id }
+ * 部门管理 - 人员增删 API
+ * GET    /api/schedule/employees     获取所有人员（登录即可查看）
+ * POST   /api/schedule/employees     新增人员  { name, employee_id, email, employee_type }（仅超管）
+ * PUT    /api/schedule/employees     修改人员  { id, email, employee_type }（仅超管）
+ * DELETE /api/schedule/employees    删除人员  { id }（仅超管）
  *
  * 注意：增删效果在"配置排班"和"配置默认规则"中只能次月生效。
  *       修改信息（如邮箱）立即生效。
@@ -16,9 +16,12 @@ export default async function handler(req, res) {
   const userInfo = getUserFromRequest(req);
   if (!userInfo) return res.status(401).json({ error: '未登录' });
 
-  const userRow = await query('SELECT is_schedule_admin, is_admin FROM users WHERE id = $1', [userInfo.id]);
-  if (!userRow.rows[0] || (!userRow.rows[0].is_schedule_admin && !userRow.rows[0].is_admin)) {
-    return res.status(403).json({ error: '无排班管理权限' });
+  // GET：登录用户均可查询；修改类操作（POST/PUT/DELETE）仅超管
+  if (req.method !== 'GET') {
+    const userRow = await query('SELECT is_admin FROM users WHERE id = $1', [userInfo.id]);
+    if (!userRow.rows[0] || !userRow.rows[0].is_admin) {
+      return res.status(403).json({ error: '无操作权限，仅超级管理员可修改人员信息' });
+    }
   }
 
   try {
@@ -36,11 +39,11 @@ export default async function handler(req, res) {
       if (!name || !employee_id) return res.status(400).json({ error: '姓名和工号必填' });
       if (!hire_date || !/^\d{6}$/.test(hire_date)) return res.status(400).json({ error: '入职日期必填，格式YYYYMM' });
 
-      // 兼职全职校验：只允许两个枚举值，缺省为全职
-      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗'];
+      // 岗位类型校验：全职/兼职用户接待岗（参与排班）+ 业务支撑岗（仅档案，不参与排班）
+      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗', '业务支撑岗'];
       const type = employee_type || '全职用户接待岗';
       if (!EMPLOYEE_TYPES.includes(type)) {
-        return res.status(400).json({ error: '兼职全职取值无效' });
+        return res.status(400).json({ error: '岗位取值无效' });
       }
 
       // 检查工号唯一
@@ -59,8 +62,8 @@ export default async function handler(req, res) {
       const { id, email, employee_type, hire_date } = req.body;
       if (!id) return res.status(400).json({ error: '缺少ID' });
 
-      // 兼职全职校验（若传了值才校验）
-      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗'];
+      // 兼职全职校验（若传了值才校验）：含业务支撑岗
+      const EMPLOYEE_TYPES = ['全职用户接待岗', '兼职用户接待岗', '业务支撑岗'];
       if (employee_type !== undefined && employee_type !== null && !EMPLOYEE_TYPES.includes(employee_type)) {
         return res.status(400).json({ error: '兼职全职取值无效' });
       }
