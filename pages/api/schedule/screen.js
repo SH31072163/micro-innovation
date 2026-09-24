@@ -45,10 +45,11 @@ export default async function handler(req, res) {
     const employees = await query(
       `SELECT name, employee_id, employee_type, hire_date, is_active, deactivated_at
        FROM schedule_employees
-       WHERE is_active = TRUE
-          OR (is_active = FALSE AND deactivated_at IS NOT NULL
-              AND (EXTRACT(YEAR FROM deactivated_at) > $1
-                   OR (EXTRACT(YEAR FROM deactivated_at) = $1 AND EXTRACT(MONTH FROM deactivated_at) >= $2)))
+       WHERE employee_type IN ('全职用户接待岗', '兼职用户接待岗')
+          AND (is_active = TRUE
+               OR (is_active = FALSE AND deactivated_at IS NOT NULL
+                   AND (EXTRACT(YEAR FROM deactivated_at) > $1
+                        OR (EXTRACT(YEAR FROM deactivated_at) = $1 AND EXTRACT(MONTH FROM deactivated_at) >= $2))))
        ORDER BY employee_id ASC`,
       [year, month]
     );
@@ -399,7 +400,7 @@ function computeScreenData(employees, allStats, allGoals, weekStats, weekGoals, 
  *   累计处理服务量 = 月份数 × 每月目标工作量 × 系数 + 本月累计工作量
  *   1) 月份数：从入职年月到上月（查询月的前一月）之间的月份数（含两端）
  *   2) 每月目标工作量：全职用户接待岗 1800 件/月，兼职用户接待岗 900 件/月
- *   3) 系数 = round(99999999 / 工号, 5)
+ *   3) 系数 = round(99999999 / 工号, 5) + (工号 mod 10) / 10
  *   4) 本月累计工作量 = 本月已过天数（1日~昨日）/ 本月天数 × 每月目标工作量
  *      （查看上月时，本月累计 = 上月完整月目标）
  */
@@ -408,10 +409,10 @@ function computeCumulativeWorkload(emp, cutoffDay, days, year, month) {
   const isFullTime = (emp.employee_type || '').includes('全职');
   const monthlyTarget = isFullTime ? 1800 : 900;
 
-  // 系数 = round(99999999 / 工号, 5)
+  // 系数 = round(99999999 / 工号, 5) + (工号 mod 10) / 10
   const empNum = parseInt(String(emp.employee_id).replace(/\D/g, ''), 10);
   if (!empNum || empNum <= 0) return 0;
-  const coefficient = Math.round((99999999 / empNum) * 100000) / 100000;
+  const coefficient = Math.round((99999999 / empNum) * 100000) / 100000 + (empNum % 10) / 10;
 
   // 月份数：入职年月 → 上月（查询月的前一个月），含两端
   // 例：入职 202509，查看 202609 → 到 202608，共 12 个月
