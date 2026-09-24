@@ -8,6 +8,7 @@ import ChatAdmin from './views/ChatAdmin';
 import AdminOverview from './views/AdminOverview';
 import AdminUsers from './views/AdminUsers';
 import MenuManage from './views/MenuManage';
+import DeptManagement from './views/DeptManagement';
 import ScheduleView from './views/schedule/ScheduleView';
 import ScheduleAdmin from './views/schedule/ScheduleAdmin';
 
@@ -53,14 +54,23 @@ export default function MainApp({ token, user, forceChangePassword, onPasswordCh
   };
 
   const handleMenuClick = (menu) => {
+    // 排班表大屏：新标签页全屏打开，不在右侧展示区渲染
+    const parent = menus.find(m => m.id === menu.parent_id);
+    const menuKey = menu.level === 2 ? menu.title : (parent ? `${parent.title}/${menu.title}` : menu.title);
+    if (menuKey === '排班表/排班表大屏') {
+      window.open('/screen', '_blank');
+      return;
+    }
     if (menu.level === 2) {
       if (menu.children && menu.children.length > 0) {
         toggleMenu(menu.id);
       } else {
         setCurrentMenu(menu);
+        setScheduleSubTab(null);
       }
     } else {
       setCurrentMenu(menu);
+      setScheduleSubTab(null);
     }
   };
 
@@ -91,10 +101,15 @@ export default function MainApp({ token, user, forceChangePassword, onPasswordCh
         return <AdminUsers {...props} />;
       case '系统管理/菜单管理':
         return <MenuManage {...props} onMenuUpdated={fetchMenus} />;
+      case '系统管理/部门管理':
+        return <DeptManagement {...props} />;
       case '排班表/中心排班表':
         return <ScheduleView {...props} />;
+      case '排班表/排班表大屏':
+        // 已改为新标签页全屏打开（/screen），右侧展示区不再渲染
+        return <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>排班表大屏已在新窗口打开</div>;
       case '排班表/管理区':
-        return <ScheduleAdmin {...props} />;
+        return <ScheduleAdmin {...props} onTabChange={setScheduleSubTab} />;
       default:
         return <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>「{currentMenu.title}」功能开发中</div>;
     }
@@ -105,6 +120,20 @@ export default function MainApp({ token, user, forceChangePassword, onPasswordCh
     const parent = menus.find(m => m.id === menu.parent_id);
     return parent ? `${parent.title}/${menu.title}` : menu.title;
   }
+
+  // 计算面包屑路径（最多3级）
+  function getBreadcrumb(menu) {
+    if (!menu) return '';
+    if (menu.level === 2) return menu.title;
+    const parent = menus.find(m => m.id === menu.parent_id);
+    if (parent) {
+      return `${parent.title} / ${menu.title}`;
+    }
+    return menu.title;
+  }
+
+  // 当 ScheduleAdmin 子标签切换时更新面包屑第三级
+  const [scheduleSubTab, setScheduleSubTab] = useState(null);
 
   return (
     <div style={{ height: '100%', display: 'flex', overflow: 'hidden' }}>
@@ -188,6 +217,17 @@ export default function MainApp({ token, user, forceChangePassword, onPasswordCh
         overflowY: 'auto',
         background: '#f9fafb',
       }}>
+        {currentMenu && (
+          <div style={{
+            padding: '6px 24px',
+            fontSize: '12px',
+            color: '#9ca3af',
+            borderBottom: '1px solid #f3f4f6',
+            background: '#f9fafb',
+          }}>
+            {getBreadcrumb(currentMenu)}{scheduleSubTab ? ` / ${scheduleSubTab}` : ''}
+          </div>
+        )}
         {renderContent()}
       </div>
 
