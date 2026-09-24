@@ -920,46 +920,73 @@ function buildWorkbook(data, year, month) {
     }
     XLSX.utils.book_append_sheet(wb, wsStats, safeSheetName(`${emp.name || emp.employee_id}-汇总统计`));
 
-    // ── Sheet C：个人月度目标 ──
+    // ── Sheet C：个人月度目标（3列：工种/目标/1日-XX日完成值） ──
     const workload = Math.round(
       ((stats.voiceDays || 0) + (stats.imDays || 0) + (stats.ticketDays || 0)
         + (stats.outboundDays || 0) + (stats.qaDays || 0)) * 90
       + (stats.testDays || 0) * 72
     );
+    // 每工种目标（上半块）：语音/工单留邮/IM文字/外呼调研/质检 90件/天，拨测体验 72件/天
+    const perTypeRows = [
+      ['语音', Math.round((stats.voiceDays || 0) * 90), 'XX件'],
+      ['工单留邮', Math.round((stats.ticketDays || 0) * 90), 'XX件'],
+      ['IM文字', Math.round((stats.imDays || 0) * 90), 'XX件'],
+      ['外呼调研', Math.round((stats.outboundDays || 0) * 90), 'XX件'],
+      ['拨测体验', Math.round((stats.testDays || 0) * 72), 'XX件'],
+      ['质检', Math.round((stats.qaDays || 0) * 90), 'XX件'],
+    ]; // TODO: 完成值列今后接入外部平台API获取，此处暂用"XX件"占位
+    // 下半块3行：工作量/语音上机时间/IM上机时间（完成值占位，TODO: 今后接API）
+    const targetRows = [
+      ['工作量', `${workload}件`, 'XX件'],
+      ['语音上机时间', `${(stats.voiceDays || 0) * 7.5}小时`, 'XX小时'],
+      ['IM上机时间', `${(stats.imDays || 0) * 7.5}小时`, 'XX小时'],
+    ];
     const goalsAoa = [
       [`${empTitle} 个人月度目标`],
-      [`${month}月排班记录`],
-      ['工种', '天数'],
-      ['语音天数', stats.voiceDays ?? ''], ['工单留邮天数', stats.ticketDays ?? ''],
-      ['IM文字天数', stats.imDays ?? ''], ['外呼调研天数', stats.outboundDays ?? ''],
-      ['拨测体验天数', stats.testDays ?? ''], ['质检天数', stats.qaDays ?? ''],
+      [`${month}月工作量目标与完成情况`],
+      ['工种', '目标', `${month}月1日-XX日完成值`],
+      ...perTypeRows.map(([l, t, c]) => [l, `${t}件`, c]),
       [''],
       [`${month}月需完成绩效考核目标`],
-      ['考核项', '目标值'],
-      ['工作量', `${workload}件`],
-      ['语音上机时间', `${(stats.voiceDays || 0) * 7.5}小时`],
-      ['IM上机时间', `${(stats.imDays || 0) * 7.5}小时`],
+      ['工种', '目标', `${month}月1日-XX日完成值`],
+      ...targetRows,
       [''],
       ['备注：语音/IM文字/外呼调研/工单留邮/质检 目标90件/天，拨测体验目标72件/天；语音/IM文字 目标7.5小时/天'],
     ];
     const wsGoals = XLSX.utils.aoa_to_sheet(goalsAoa);
     const gRows = goalsAoa.length;
+
+    // 行号按结构推导（0-based，防止手工数错行）：
+    // 0=标题 1=上半块标题 2=上半块表头 3~8=上半块6行 9=空行
+    // 10=下半块标题 11=下半块表头 12~14=下半块3行 15=空行 16=备注
+    const idxB1Title = 1;
+    const idxB1Header = 2;
+    const idxB1DataStart = 3;
+    const idxB1DataEnd = idxB1DataStart + perTypeRows.length - 1;        // 8
+    const idxSpacer1 = idxB1DataEnd + 1;                                  // 9
+    const idxB2Title = idxSpacer1 + 1;                                     // 10
+    const idxB2Header = idxB2Title + 1;                                    // 11
+    const idxB2DataStart = idxB2Header + 1;                                // 12
+    const idxB2DataEnd = idxB2DataStart + targetRows.length - 1;           // 14
+    const idxSpacer2 = idxB2DataEnd + 1;                                   // 15
+    const idxNote = idxSpacer2 + 1;                                        // 16
+
     wsGoals['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: 1 } },
-      { s: { r: 10, c: 0 }, e: { r: 10, c: 1 } },
-      { s: { r: gRows - 1, c: 0 }, e: { r: gRows - 1, c: 1 } },
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 2 } },
+      { s: { r: idxB1Title, c: 0 }, e: { r: idxB1Title, c: 2 } },
+      { s: { r: idxB2Title, c: 0 }, e: { r: idxB2Title, c: 2 } },
+      { s: { r: idxNote, c: 0 }, e: { r: idxNote, c: 2 } },
     ];
-    wsGoals['!cols'] = [{ wch: 18 }, { wch: 14 }];
+    wsGoals['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 18 }];
     wsGoals['!rows'] = goalsAoa.map((_, i) => {
-      if (i === 0) return { hpt: 30 };
-      if (i === 1 || i === 10) return { hpt: 26 };
-      if (i === gRows - 1) return { hpt: 44 };
-      if (i === 9 || i === 15) return { hpt: 8 };
-      return { hpt: 22 };
+      if (i === 0) return { hpt: 30 };                                   // 总标题
+      if (i === idxB1Title || i === idxB2Title) return { hpt: 26 };      // 两块小标题
+      if (i === idxNote) return { hpt: 44 };                              // 备注
+      if (i === idxSpacer1 || i === idxSpacer2) return { hpt: 8 };       // 两处空行分隔
+      return { hpt: 22 };                                                 // 其余数据行统一22pt
     });
     wsGoals['A1'].s = titleStyle;
-    for (const sr of [1, 10]) {
+    for (const sr of [idxB1Title, idxB2Title]) {
       const cell = wsGoals[XLSX.utils.encode_cell({ r: sr, c: 0 })];
       if (cell) cell.s = {
         font: { bold: true, sz: 12, color: { rgb: 'FF1E3A5F' } },
@@ -968,48 +995,38 @@ function buildWorkbook(data, year, month) {
         border: thinBorder,
       };
     }
-    for (const hr of [2, 11]) {
-      for (let c = 0; c <= 1; c++) {
+    for (const hr of [idxB1Header, idxB2Header]) {
+      for (let c = 0; c <= 2; c++) {
         const cell = wsGoals[XLSX.utils.encode_cell({ r: hr, c })];
         if (cell) cell.s = headerCellStyle;
       }
     }
-    for (let r = 3; r <= 8; r++) {
-      const bg = rowBg(r - 3);
-      const labCell = wsGoals[XLSX.utils.encode_cell({ r, c: 0 })];
-      const valCell = wsGoals[XLSX.utils.encode_cell({ r, c: 1 })];
-      if (labCell) labCell.s = {
-        font: { sz: 11, color: { rgb: 'FF374151' } },
-        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
-        alignment: { horizontal: 'left', vertical: 'center' },
-        border: thinBorder,
-      };
-      if (valCell) valCell.s = {
-        font: { bold: true, sz: 11, color: { rgb: 'FF1E3A5F' } },
-        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
-        alignment: { horizontal: 'center', vertical: 'center' },
-        border: thinBorder,
-      };
+    for (let r = idxB1DataStart; r <= idxB1DataEnd; r++) {
+      const bg = rowBg(r - idxB1DataStart);
+      for (let c = 0; c <= 2; c++) {
+        const cell = wsGoals[XLSX.utils.encode_cell({ r, c })];
+        if (cell) cell.s = {
+          font: { bold: c > 0, sz: 11, color: { rgb: c > 0 ? 'FF1E3A5F' : 'FF374151' } },
+          fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+          alignment: { horizontal: c === 0 ? 'left' : 'center', vertical: 'center' },
+          border: thinBorder,
+        };
+      }
     }
-    for (let r = 12; r <= 14; r++) {
-      const bg = rowBg(r - 12);
-      const labCell = wsGoals[XLSX.utils.encode_cell({ r, c: 0 })];
-      const valCell = wsGoals[XLSX.utils.encode_cell({ r, c: 1 })];
-      if (labCell) labCell.s = {
-        font: { sz: 11, color: { rgb: 'FF374151' } },
-        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
-        alignment: { horizontal: 'left', vertical: 'center' },
-        border: thinBorder,
-      };
-      if (valCell) valCell.s = {
-        font: { bold: true, sz: 11, color: { rgb: 'FF2563EB' } },
-        fill: { fgColor: { rgb: bg }, patternType: 'solid' },
-        alignment: { horizontal: 'center', vertical: 'center' },
-        border: thinBorder,
-      };
+    for (let r = idxB2DataStart; r <= idxB2DataEnd; r++) {
+      const bg = rowBg(r - idxB2DataStart);
+      for (let c = 0; c <= 2; c++) {
+        const cell = wsGoals[XLSX.utils.encode_cell({ r, c })];
+        if (cell) cell.s = {
+          font: { bold: c > 0, sz: 11, color: { rgb: c > 0 ? 'FF2563EB' : 'FF374151' } },
+          fill: { fgColor: { rgb: bg }, patternType: 'solid' },
+          alignment: { horizontal: c === 0 ? 'left' : 'center', vertical: 'center' },
+          border: thinBorder,
+        };
+      }
     }
     {
-      const cell = wsGoals[XLSX.utils.encode_cell({ r: gRows - 1, c: 0 })];
+      const cell = wsGoals[XLSX.utils.encode_cell({ r: idxNote, c: 0 })];
       if (cell) cell.s = {
         font: { sz: 9, color: { rgb: 'FF9CA3AF' } },
         alignment: { horizontal: 'left', vertical: 'top', wrapText: true },
