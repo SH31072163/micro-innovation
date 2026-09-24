@@ -2,12 +2,12 @@ import { query } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
 
 /**
- * 国定假日 API
+ * 国定假日 API（部门管理 - 假日配置）
  *
  * GET    /api/schedule/holidays?year=2026
- *   获取指定年份的国定假日
+ *   获取指定年份的国定假日（登录即可查看）
  *
- * POST   /api/schedule/holidays
+ * POST   /api/schedule/holidays（仅超管）
  *   { action: 'fetch', year }  - 从API自动获取当年假日并存入数据库
  *   { action: 'add', date, name, is_holiday }  - 手动添加/修正
  *   { action: 'delete', id }  - 删除一条
@@ -17,9 +17,12 @@ export default async function handler(req, res) {
   const userInfo = getUserFromRequest(req);
   if (!userInfo) return res.status(401).json({ error: '未登录' });
 
-  const userRow = await query('SELECT is_schedule_admin, is_admin FROM users WHERE id = $1', [userInfo.id]);
-  if (!userRow.rows[0] || (!userRow.rows[0].is_schedule_admin && !userRow.rows[0].is_admin)) {
-    return res.status(403).json({ error: '无排班管理权限' });
+  // GET：登录用户均可查询；修改类操作（POST）仅超管
+  if (req.method !== 'GET') {
+    const userRow = await query('SELECT is_admin FROM users WHERE id = $1', [userInfo.id]);
+    if (!userRow.rows[0] || !userRow.rows[0].is_admin) {
+      return res.status(403).json({ error: '无操作权限，仅超级管理员可修改假日配置' });
+    }
   }
 
   try {
