@@ -1,5 +1,6 @@
 import { query } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
+import { getGoalEndDayLabel } from '../../../lib/goalDate';
 
 /**
  * 中心排班表查看 API
@@ -56,9 +57,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 获取员工列表（按工号排序） ──
+    // ── 获取员工列表（仅排班岗位：全职/兼职用户接待岗，按工号排序） ──
     const employees = await query(
-      'SELECT name, employee_id, email FROM schedule_employees WHERE is_active = TRUE ORDER BY employee_id ASC'
+      'SELECT name, employee_id, email FROM schedule_employees WHERE is_active = TRUE AND employee_type IN (\'全职用户接待岗\', \'兼职用户接待岗\') ORDER BY employee_id ASC'
     );
 
     // ── 获取排班记录 ──
@@ -97,7 +98,17 @@ export default async function handler(req, res) {
       const stats = computePersonalStats(personalRecords, days);
 
       // 计算个人月度目标
-      const goals = computePersonalGoals(personalRecords, stats);
+      const goals = computePersonalGoals(personalRecords, stats, year, month);
+
+      // 获取数据字典（am/pm 工种、班次、餐时完整值列表）
+      const dictResult = await query(
+        'SELECT category, value, sort_order FROM schedule_dict ORDER BY category ASC, sort_order ASC'
+      );
+      const dictData = {};
+      for (const row of dictResult.rows) {
+        if (!dictData[row.category]) dictData[row.category] = [];
+        dictData[row.category].push(row.value);
+      }
 
       return res.status(200).json({
         year, month, days, weekdays,
@@ -105,6 +116,7 @@ export default async function handler(req, res) {
         personalRecords,
         stats,
         goals,
+        dictData,
       });
     }
 
@@ -222,14 +234,18 @@ function computePersonalStats(records, days) {
 }
 
 function isOnMachineType(type) {
-  const onMachine = ['拨测体验', '语音', '工单留邮', '文字IM', 'IM文字', '外呼调研', '代值班', '质检'];
+  const onMachine = ['拨测体验', '语音', '工单留邮', '文字IM', 'IM文字', '外呼调研', '质检'];
   return onMachine.includes(type);
 }
 
 /**
  * 计算个人月度目标
+ *
+ * 2026-09-21 新增：每工种目标（voiceTarget等）+ 完成值占位（completedVoice等）
+ * 完成值当前为占位文本“XX件”/“XX小时”，今后接入外部平台API后在此处替换
+ * （接API时仅需改后端，弹窗/邮件/Excel导出三处渲染自动同步）
  */
-function computePersonalGoals(records, stats) {
+function computePersonalGoals(records, stats, year, month) {
   // 工作量 = (语音+IM+工单+外呼+质检)*90 + 拨测*72
   const workload90 = (stats.voiceDays + stats.imDays + stats.ticketDays + stats.outboundDays + stats.qaDays) * 90;
   const workload72 = stats.testDays * 72;
@@ -240,9 +256,38 @@ function computePersonalGoals(records, stats) {
   // IM上机时间 = IM天数 * 7.5
   const imMachineTime = stats.imDays * 7.5;
 
+  // ── 每工种目标（上半块：X月工作量目标与完成情况）──
+  // 换算规则：语音/IM/工单留邮/外呼调研/质检 90件/天，拨测体验 72件/天
+  const perTypeTargets = [
+    ['voice', '语音', Math.round(stats.voiceDays * 90)],
+    ['ticket', '工单留邮', Math.round(stats.ticketDays * 90)],
+    ['im', 'IM文字', Math.round(stats.imDays * 90)],
+    ['outbound', '外呼调研', Math.round(stats.outboundDays * 90)],
+    ['test', '拨测体验', Math.round(stats.testDays * 72)],
+    ['qa', '质检', Math.round(stats.qaDays * 90)],
+  ];
+  const perType = perTypeTargets.map(([key, label, target]) => ({
+    key, label,
+    target: `${target}件`,
+    // TODO: 今后接入外部平台API，替换为实际完成量（如“123件”）
+    completed: 'XX件',
+  }));
+
+  // ── 完成值占位（下半块：X月需完成绩效考核目标）──
+  // TODO: 今后接入外部平台API，替换为实际完成值
+  const completed = {
+    workload: 'XX件',
+    voiceMachineTime: 'XX小时',
+    imMachineTime: 'XX小时',
+  };
+
   return {
     workload: `${Math.round(workload)}件`,
     voiceMachineTime: `${voiceMachineTime}小时`,
     imMachineTime: `${imMachineTime}小时`,
+    // “1日-XX日完成值”列标题（XX=当天退1天，不跨月）
+    endDayLabel: getGoalEndDayLabel(year, month),
+    perType,
+    completed,
   };
 }
