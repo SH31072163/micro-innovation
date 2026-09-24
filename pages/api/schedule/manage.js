@@ -2,6 +2,7 @@ import { query, queryBatch } from '../../../lib/db';
 import { getUserFromRequest } from '../../../lib/auth';
 import { sendMail } from '../../../lib/mailer';
 import { generateScheduleEmailHTML } from '../../../lib/scheduleEmailTemplate';
+import { getGoalEndDayLabel } from '../../../lib/goalDate';
 
 /**
  * 排班表管理区 - 配置排班 API
@@ -51,8 +52,9 @@ export default async function handler(req, res) {
       const { allowed, diff } = checkMonthAllowed(year, month);
       if (!allowed) return res.status(403).json({ error: '仅可管理上月、本月和次月的排班表' });
 
+      // 获取员工列表（仅排班岗位：全职/兼职用户接待岗）
       const employees = await query(
-        'SELECT name, employee_id, employee_type FROM schedule_employees WHERE is_active = TRUE ORDER BY employee_id ASC'
+        'SELECT name, employee_id, employee_type FROM schedule_employees WHERE is_active = TRUE AND employee_type IN (\'全职用户接待岗\', \'兼职用户接待岗\') ORDER BY employee_id ASC'
       );
 
       const records = await query(
@@ -209,9 +211,9 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: '仅次月允许重新排班，本月/上月排班表不可重新排班' });
       }
 
-      // 获取员工列表
+      // 获取员工列表（仅排班岗位：全职/兼职用户接待岗）
       const employees = await query(
-        'SELECT name, employee_id, employee_type FROM schedule_employees WHERE is_active = TRUE ORDER BY employee_id ASC'
+        'SELECT name, employee_id, employee_type FROM schedule_employees WHERE is_active = TRUE AND employee_type IN (\'全职用户接待岗\', \'兼职用户接待岗\') ORDER BY employee_id ASC'
       );
 
       // 获取默认规则
@@ -1329,7 +1331,7 @@ async function sendAdjustmentEmails(year, month, changedEmployeeIds) {
       const recordsMap = recsByEmp[emp.employee_id] || {};
 
       const stats = computePersonalStatsForEmail(recordsMap, days);
-      const goals = computePersonalGoalsForEmail(stats);
+      const goals = computePersonalGoalsForEmail(stats, year, month);
 
       const html = generateScheduleEmailHTML(
         'all',
@@ -1455,14 +1457,38 @@ function computeDayStats(recordsMap, employees, days) {
 /**
  * 计算个人月度目标（用于邮件发送）
  */
-function computePersonalGoalsForEmail(stats) {
+function computePersonalGoalsForEmail(stats, year, month) {
   const workload90 = (stats.voiceDays + stats.imDays + stats.ticketDays + stats.outboundDays + stats.qaDays) * 90;
   const workload72 = stats.testDays * 72;
   const workload = workload90 + workload72;
+
+  // 每工种目标（上半块：X月工作量目标与完成情况）
+  const perTypeTargets = [
+    ['voice', '语音', Math.round(stats.voiceDays * 90)],
+    ['ticket', '工单留邮', Math.round(stats.ticketDays * 90)],
+    ['im', 'IM文字', Math.round(stats.imDays * 90)],
+    ['outbound', '外呼调研', Math.round(stats.outboundDays * 90)],
+    ['test', '拨测体验', Math.round(stats.testDays * 72)],
+    ['qa', '质检', Math.round(stats.qaDays * 90)],
+  ];
+  const perType = perTypeTargets.map(([key, label, target]) => ({
+    key, label,
+    target: `${target}件`,
+    completed: 'XX件', // TODO: 今后接入外部平台API，替换为实际完成量
+  }));
+
+  const completed = { // TODO: 今后接入外部平台API，替换为实际完成值
+    workload: 'XX件',
+    voiceMachineTime: 'XX小时',
+    imMachineTime: 'XX小时',
+  };
 
   return {
     workload: `${Math.round(workload)}件`,
     voiceMachineTime: `${stats.voiceDays * 7.5}小时`,
     imMachineTime: `${stats.imDays * 7.5}小时`,
+    endDayLabel: getGoalEndDayLabel(year, month),
+    perType,
+    completed,
   };
 }
